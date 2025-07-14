@@ -59,7 +59,9 @@ export default function Home() {
         <form onSubmit={addNote} className="flex w-full gap-2">
           <input
             className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
-            value={editValue}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            ref={inputRef}
             autoFocus
           />
           <button
