@@ -58,14 +58,8 @@ export default function Home() {
         <p className="text-lg text-muted-foreground mb-4 text-center">A simple, beautiful note-taking app. Your notes are saved in your browser.</p>
         <form onSubmit={addNote} className="flex w-full gap-2">
           <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            placeholder="Write a new note..."
-            className="flex-1 px-4 py-2 rounded border border-border bg-white dark:bg-black/40 text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition"
-            maxLength={200}
-            aria-label="New note"
+            className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
+            value={editValue}
             autoFocus
           />
           <button
