@@ -2,27 +2,42 @@
 
 import { useState, useRef, useEffect } from "react";
 
+// Define the Thought type to match backend
+interface Thought {
+  id: number;
+  content: string;
+}
+
 export default function Home() {
-  const [notes, setNotes] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("notes");
-      return saved ? JSON.parse(saved) : [];
-    }
-    return [];
-  });
+  const [notes, setNotes] = useState<Thought[]>([]);
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    localStorage.setItem("notes", JSON.stringify(notes));
-  }, [notes]);
+    // Optionally, fetch existing notes from backend on mount
+    fetch("http://localhost:8000/thoughts/")
+      .then(res => res.json())
+      .then(data => setNotes(data));
+  }, []);
 
-  function addNote(e: React.FormEvent) {
+  async function addNote(e: React.FormEvent) {
     e.preventDefault();
     if (input.trim()) {
-      setNotes([input.trim(), ...notes]);
-      setInput("");
-      inputRef.current?.focus();
+      // POST to backend
+      const res = await fetch("http://localhost:8000/thoughts/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: input.trim() })
+      });
+      if (res.ok) {
+        const newThought: Thought = await res.json();
+        setNotes([newThought, ...notes]);
+        setInput("");
+        inputRef.current?.focus();
+      } else {
+        // Handle error (optional)
+        alert("Failed to add note");
+      }
     }
   }
 
@@ -62,10 +77,10 @@ export default function Home() {
         )}
         {notes.map((note, idx) => (
           <li
-            key={idx}
+            key={note.id}
             className="flex items-center justify-between bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm group hover:shadow-md transition"
           >
-            <span className="break-words flex-1 pr-4">{note}</span>
+            <span className="break-words flex-1 pr-4">{note.content}</span>
             <button
               onClick={() => deleteNote(idx)}
               className="opacity-60 group-hover:opacity-100 text-red-500 hover:text-red-700 transition ml-2"

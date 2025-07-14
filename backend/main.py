@@ -1,8 +1,17 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Models ---
 
@@ -20,6 +29,9 @@ class Document(BaseModel):
     label: str
     thoughts: List[ProcessedThought]
 
+class ThoughtCreate(BaseModel):
+    content: str
+
 # --- In-memory storage (for demo purposes) ---
 
 thoughts_db: List[Thought] = []
@@ -29,10 +41,12 @@ documents_db: List[Document] = []
 # --- Endpoints ---
 
 @app.post("/thoughts/", response_model=Thought)
-def create_thought(thought: Thought):
-    print(f"Received thought: {thought}")  # Debug print
-    thoughts_db.append(thought)
-    return thought
+def create_thought(thought: ThoughtCreate):
+    new_id = (thoughts_db[-1].id + 1) if thoughts_db else 1
+    new_thought = Thought(id=new_id, content=thought.content)
+    print(f"Received thought: {new_thought}")  # Debug print
+    thoughts_db.append(new_thought)
+    return new_thought
 
 @app.get("/thoughts/", response_model=List[Thought])
 def list_thoughts():
