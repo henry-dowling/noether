@@ -2,6 +2,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
+from enum import Enum
+import os
+import openai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -19,10 +25,16 @@ class Thought(BaseModel):
     id: int
     content: str
 
+class DestinationEnum(str, Enum):
+    reading_list = "Reading list"
+    todos = "Todos"
+    blog = "Blog"
+    calendar = "Calendar"
+
 class ProcessedThought(BaseModel):
     id: int
     content: str
-    destination: str
+    destination: DestinationEnum
 
 class Document(BaseModel):
     id: int
@@ -40,13 +52,17 @@ documents_db: List[Document] = []
 
 # --- Endpoints ---
 
-@app.post("/thoughts/", response_model=Thought)
+@app.post("/thoughts/", response_model=ProcessedThought)
 def create_thought(thought: ThoughtCreate):
     new_id = (thoughts_db[-1].id + 1) if thoughts_db else 1
     new_thought = Thought(id=new_id, content=thought.content)
     print(f"Received thought: {new_thought}")  # Debug print
     thoughts_db.append(new_thought)
-    return new_thought
+    # Use OpenAI to categorize the thought with Enum
+    destination = categorize_thought_with_openai(new_thought.content)
+    processed = ProcessedThought(id=new_thought.id, content=new_thought.content, destination=destination)
+    processed_thoughts_db.append(processed)
+    return processed
 
 @app.get("/thoughts/", response_model=List[Thought])
 def list_thoughts():
@@ -76,3 +92,37 @@ def create_document(label: str, thought_ids: List[int]):
 @app.get("/documents/", response_model=List[Document])
 def list_documents():
     return documents_db
+
+@app.get("/destinations/", response_model=List[str])
+def get_destinations():
+    return [e.value for e in DestinationEnum]
+
+def categorize_thought_with_openai(content: str) -> DestinationEnum:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY environment variable not set.")
+    categories = [e.value for e in DestinationEnum]
+    prompt = (
+        f"Categorize the following thought into one of these categories: {categories}. "
+        f"Return only the category name.\nThought: '{content}'\nCategory:"
+    )
+    try:
+        client = openai.OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that categorizes thoughts."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=5,
+            temperature=0
+        )
+        label = response.choices[0].message.content.strip()
+        if label in categories:
+            return DestinationEnum(label)
+        else:
+            print(f"OpenAI returned unknown category: {label}")
+            return DestinationEnum.reading_list  # Default fallback
+    except Exception as e:
+        print(f"OpenAI error: {e}")
+        return DestinationEnum.reading_list  # Default fallback

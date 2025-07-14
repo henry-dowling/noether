@@ -6,15 +6,21 @@ import { useState, useRef, useEffect } from "react";
 interface Thought {
   id: number;
   content: string;
+  destination: string; // Now dynamic, fetched from backend
 }
 
 export default function Home() {
   const [notes, setNotes] = useState<Thought[]>([]);
   const [input, setInput] = useState("");
+  const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Optionally, fetch existing notes from backend on mount
+    // Fetch allowed destinations from backend
+    fetch("http://localhost:8000/destinations/")
+      .then(res => res.json())
+      .then(data => setDestinations(data));
+    // Fetch existing notes from backend on mount
     fetch("http://localhost:8000/thoughts/")
       .then(res => res.json())
       .then(data => setNotes(data));
@@ -80,7 +86,12 @@ export default function Home() {
             key={note.id}
             className="flex items-center justify-between bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm group hover:shadow-md transition"
           >
-            <span className="break-words flex-1 pr-4">{note.content}</span>
+            <div className="flex-1 pr-4">
+              <span className="break-words block font-medium">{note.content}</span>
+              <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                {note.destination}
+              </span>
+            </div>
             <button
               onClick={() => deleteNote(idx)}
               className="opacity-60 group-hover:opacity-100 text-red-500 hover:text-red-700 transition ml-2"
