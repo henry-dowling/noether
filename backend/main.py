@@ -80,6 +80,22 @@ def process_thought(thought: Thought):
 def list_processed_thoughts():
     return processed_thoughts_db
 
+@app.put("/processed_thoughts/{thought_id}", response_model=ProcessedThought)
+def update_processed_thought(thought_id: int, updated_thought: ProcessedThought):
+    for i, thought in enumerate(processed_thoughts_db):
+        if thought.id == thought_id:
+            processed_thoughts_db[i] = updated_thought
+            return updated_thought
+    raise HTTPException(status_code=404, detail="Thought not found")
+
+@app.delete("/processed_thoughts/{thought_id}")
+def delete_processed_thought(thought_id: int):
+    for i, thought in enumerate(processed_thoughts_db):
+        if thought.id == thought_id:
+            del processed_thoughts_db[i]
+            return {"message": "Thought deleted successfully"}
+    raise HTTPException(status_code=404, detail="Thought not found")
+
 @app.post("/documents/", response_model=Document)
 def create_document(label: str, thought_ids: List[int]):
     selected_thoughts = [pt for pt in processed_thoughts_db if pt.id in thought_ids]

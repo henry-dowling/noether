@@ -34,9 +34,6 @@ interface Document {
   thoughts: ProcessedThought[];
 }
 
-// Toggle this to switch between mock data and backend
-const USE_MOCK_DATA = true;
-
 // Define the Thought type to match backend
 interface Thought {
   id: number;
@@ -50,14 +47,21 @@ export default function Home() {
   const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   
-  // Documents state (from backend)
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [selectedDocId, setSelectedDocId] = useState<number | null>(null);
-  const selectedDoc = documents.find((doc) => doc.id === selectedDocId);
-  const [loadingDocs, setLoadingDocs] = useState(false);
-  const [errorDocs, setErrorDocs] = useState<string | null>(null);
+  // Processed thoughts state (from backend)
+  const [processedThoughts, setProcessedThoughts] = useState<ProcessedThought[]>([]);
+  const [loadingThoughts, setLoadingThoughts] = useState(false);
+  const [errorThoughts, setErrorThoughts] = useState<string | null>(null);
   const [editThoughtId, setEditThoughtId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
+
+  // Destination view state
+  const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
+  const [isUserActive, setIsUserActive] = useState(false);
+
+  // Get thoughts for selected destination
+  const destinationThoughts = selectedDestination 
+    ? processedThoughts.filter(thought => thought.destination === selectedDestination)
+    : [];
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -71,52 +75,112 @@ export default function Home() {
   // Handle drag end for thoughts
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (!selectedDoc || !over || active.id === over.id) return;
-    const oldIndex = selectedDoc.thoughts.findIndex((t) => t.id === active.id);
-    const newIndex = selectedDoc.thoughts.findIndex((t) => t.id === over.id);
+    
+    if (!over || active.id === over.id) return;
+    
+    const activeThought = destinationThoughts.find(t => t.id === active.id);
+    const overThought = destinationThoughts.find(t => t.id === over.id);
+    
+    if (!activeThought || !overThought) return;
+    
+    const oldIndex = destinationThoughts.findIndex((t) => t.id === active.id);
+    const newIndex = destinationThoughts.findIndex((t) => t.id === over.id);
+    
     if (oldIndex === -1 || newIndex === -1) return;
-    const newThoughts = arrayMove(selectedDoc.thoughts, oldIndex, newIndex);
-    setDocuments((docs) =>
-      docs.map((doc) =>
-        doc.id === selectedDoc.id ? { ...doc, thoughts: newThoughts } : doc
-      )
-    );
+    
+    // Set user as active during drag operation
+    setIsUserActive(true);
+    
+    // For destination view, we'll just reorder the display
+    // The actual reordering would need to be handled by the backend
+    // For now, we'll just update the display order
+    const newThoughts = arrayMove(destinationThoughts, oldIndex, newIndex);
+    // Note: This is a simplified implementation for destination view
+    // In a real app, you'd want to persist the order to the backend
+    
+    // Clear user activity after a short delay to allow for the drag to complete
+    setTimeout(() => setIsUserActive(false), 1000);
   };
 
   // Handle edit
   const startEdit = (thought: ProcessedThought) => {
     setEditThoughtId(thought.id);
     setEditValue(thought.content);
+    setIsUserActive(true);
   };
-  const saveEdit = (thought: ProcessedThought) => {
-    setDocuments((docs) =>
-      docs.map((doc) =>
-        doc.id === selectedDoc?.id
-          ? {
-              ...doc,
-              thoughts: doc.thoughts.map((t) =>
-                t.id === thought.id ? { ...t, content: editValue } : t
-              ),
-            }
-          : doc
-      )
-    );
-    setEditThoughtId(null);
-    setEditValue("");
+  
+  const saveEdit = async (thought: ProcessedThought) => {
+    try {
+      // Update thought in backend
+      const res = await fetch(`http://localhost:8000/processed_thoughts/${thought.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...thought,
+          content: editValue
+        })
+      });
+      
+      if (res.ok) {
+        // Update local state
+        setProcessedThoughts((thoughts) =>
+          thoughts.map((t) =>
+            t.id === thought.id ? { ...t, content: editValue } : t
+          )
+        );
+        setEditThoughtId(null);
+        setEditValue("");
+        setIsUserActive(false);
+      } else {
+        console.error("Failed to update thought");
+        alert("Failed to update thought");
+        setIsUserActive(false);
+      }
+    } catch (err) {
+      console.error("Error updating thought:", err);
+      alert("Error updating thought");
+      setIsUserActive(false);
+    }
   };
 
   // Handle delete
-  const deleteThought = (thoughtId: number) => {
-    setDocuments((docs) =>
-      docs.map((doc) =>
-        doc.id === selectedDoc?.id
-          ? {
-              ...doc,
-              thoughts: doc.thoughts.filter((t) => t.id !== thoughtId),
-            }
-          : doc
-      )
-    );
+  const deleteThought = async (thoughtId: number) => {
+    try {
+      // Delete thought from backend
+      const res = await fetch(`http://localhost:8000/processed_thoughts/${thoughtId}`, {
+        method: "DELETE",
+      });
+      
+      if (res.ok) {
+        // Update local state
+        setProcessedThoughts((thoughts) =>
+          thoughts.filter((t) => t.id !== thoughtId)
+        );
+      } else {
+        console.error("Failed to delete thought");
+        alert("Failed to delete thought");
+      }
+    } catch (err) {
+      console.error("Error deleting thought:", err);
+      alert("Error deleting thought");
+    }
+  };
+
+  // Function to refresh processed thoughts from backend
+  const refreshProcessedThoughts = async () => {
+    try {
+      const res = await fetch("http://localhost:8000/processed_thoughts/");
+      if (res.ok) {
+        const data = await res.json();
+        setProcessedThoughts(data);
+      } else {
+        console.error("Failed to fetch processed thoughts");
+      }
+    } catch (err) {
+      console.error("Error refreshing processed thoughts:", err);
+    }
   };
 
   // Sortable Thought Item
@@ -149,12 +213,13 @@ export default function Home() {
             value={editValue}
             autoFocus
             onChange={(e) => setEditValue(e.target.value)}
-            onBlur={() => saveEdit(thought)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveEdit(thought);
+            onBlur={async () => await saveEdit(thought)}
+            onKeyDown={async (e) => {
+              if (e.key === "Enter") await saveEdit(thought);
               if (e.key === "Escape") {
                 setEditThoughtId(null);
                 setEditValue("");
+                setIsUserActive(false);
               }
             }}
           />
@@ -173,9 +238,9 @@ export default function Home() {
         <button
           className="ml-2 text-red-500 hover:text-red-700 text-lg font-bold px-2 py-0.5 rounded focus:outline-none"
           title="Delete thought"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation();
-            deleteThought(thought.id);
+            await deleteThought(thought.id);
           }}
         >
           ×
@@ -187,6 +252,7 @@ export default function Home() {
   async function addNote(e: React.FormEvent) {
     e.preventDefault();
     if (input.trim()) {
+      setIsUserActive(true);
       // POST to backend
       const res = await fetch("http://localhost:8000/thoughts/", {
         method: "POST",
@@ -196,18 +262,21 @@ export default function Home() {
         body: JSON.stringify({ content: input.trim() })
       });
       if (res.ok) {
-        const newThought: Thought = await res.json();
-        setNotes([newThought, ...notes]);
+        const newProcessedThought: ProcessedThought = await res.json();
+        // Refresh the processed thoughts to get the latest data
+        await refreshProcessedThoughts();
         setInput("");
         inputRef.current?.focus();
+        setIsUserActive(false);
       } else {
         // Handle error (optional)
         alert("Failed to add note");
+        setIsUserActive(false);
       }
     }
   }
 
-  // Fetch documents from backend (replaced with mock data for testing)
+  // Fetch data from backend 
   useEffect(() => {
     // Fetch allowed destinations from backend
     fetch("http://localhost:8000/destinations/")
@@ -221,94 +290,58 @@ export default function Home() {
       .then(data => setNotes(data))
       .catch(err => console.error("Failed to fetch thoughts:", err));
 
-    setLoadingDocs(true);
-    setErrorDocs(null);
-    if (USE_MOCK_DATA) {
-      // Example mock data
-      const mockDocuments: Document[] = [
-        {
-          id: 1,
-          label: "Project Alpha",
-          thoughts: [
-            {
-              id: 101,
-              content: "Summarized the project requirements and next steps.",
-              destination: "Summary Section",
-            },
-            {
-              id: 102,
-              content: "Identified key stakeholders for the kickoff meeting.",
-              destination: "Stakeholders List",
-            },
-          ],
-        },
-        {
-          id: 2,
-          label: "Research Notes",
-          thoughts: [
-            {
-              id: 201,
-              content: "Compiled recent findings on AI advancements.",
-              destination: "Findings",
-            },
-          ],
-        },
-        {
-          id: 3,
-          label: "Personal Journal",
-          thoughts: [],
-        },
-      ];
-      setTimeout(() => {
-        setDocuments(mockDocuments);
-        if (mockDocuments.length > 0) setSelectedDocId(mockDocuments[0].id);
-        setLoadingDocs(false);
-      }, 500); // Simulate loading delay
-    } else {
-      fetch("/documents")
-        .then((res) => {
-          if (!res.ok) throw new Error("Failed to fetch documents");
-          return res.json();
-        })
-        .then((data) => {
-          setDocuments(data);
-          if (data.length > 0) setSelectedDocId(data[0].id);
-        })
-        .catch((err) => setErrorDocs(err.message))
-        .finally(() => setLoadingDocs(false));
-    }
+    setLoadingThoughts(true);
+    setErrorThoughts(null);
+
+    // Fetch processed thoughts from backend
+    fetch("http://localhost:8000/processed_thoughts/")
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch processed thoughts");
+        return res.json();
+      })
+      .then((data) => {
+        setProcessedThoughts(data);
+      })
+      .catch((err) => setErrorThoughts(err.message))
+      .finally(() => setLoadingThoughts(false));
+    
   }, []);
+
+  // Polling effect to refresh processed thoughts periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isUserActive) {
+        refreshProcessedThoughts();
+      }
+    }, 5000); // Refresh every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [isUserActive]);
 
   return (
     <div className="min-h-screen flex flex-row bg-background">
       {/* Sidebar */}
       <aside className="w-72 min-h-screen border-r border-border bg-white dark:bg-black/40 flex flex-col p-4 gap-2">
-        <Card className="mb-2 shadow-none border-none bg-transparent">
+        {/* Destinations Section */}
+        <Card className="shadow-none border-none bg-transparent">
           <CardHeader className="p-0 mb-2">
-            <CardTitle className="text-xl font-bold text-foreground">Documents</CardTitle>
+            <CardTitle className="text-xl font-bold text-foreground">Destinations</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
-            <ul className="flex flex-col gap-1 mb-2">
-              <li>
-                <Link href="/notes">
-                  <Button variant="outline" className="w-full justify-start">Noteworthy Notes</Button>
-                </Link>
-              </li>
-            </ul>
-            {loadingDocs && <div className="text-muted-foreground">Loading...</div>}
-            {errorDocs && <div className="text-red-500">{errorDocs}</div>}
             <ul className="flex flex-col gap-1">
-              {documents.length === 0 && !loadingDocs && (
-                <li className="text-muted-foreground select-none">No documents</li>
+              {destinations.length === 0 && (
+                <li className="text-muted-foreground select-none">No destinations</li>
               )}
-              {documents.map((doc) => (
-                <li key={doc.id}>
+              {destinations.map((destination, index) => (
+                <li key={index}>
                   <Button
-                    variant={selectedDocId === doc.id ? "default" : "ghost"}
-                    className={`w-full justify-start ${selectedDocId === doc.id ? "bg-primary text-background" : ""}`}
-                    onClick={() => setSelectedDocId(doc.id)}
+                    variant={selectedDestination === destination ? "default" : "ghost"}
+                    className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
+                    onClick={() => {
+                      setSelectedDestination(destination);
+                    }}
                   >
-                    {doc.label}
+                    {destination}
                   </Button>
                 </li>
               ))}
@@ -319,28 +352,35 @@ export default function Home() {
       {/* Main content */}
       <main className="flex-1 flex flex-col items-center justify-start px-4 py-12 gap-8">
         <Separator className="my-8 w-full max-w-xl" />
-        {/* Processed Thoughts for selected document */}
+        {/* Processed Thoughts for selected destination */}
         <Card className="w-full max-w-xl">
           <CardHeader>
-            <CardTitle className="text-2xl font-semibold mb-4 text-foreground">Processed Thoughts</CardTitle>
+            <CardTitle className="text-2xl font-semibold mb-4 text-foreground">
+              {selectedDestination 
+                ? `Thoughts for "${selectedDestination}"` 
+                : 'Processed Thoughts'
+              }
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {!selectedDoc && <div className="text-muted-foreground">Select a document to view its thoughts.</div>}
-            {selectedDoc && selectedDoc.thoughts.length === 0 && (
-              <div className="text-muted-foreground">No processed thoughts for this document.</div>
+            {!selectedDestination && (
+              <div className="text-muted-foreground">Select a destination to view its thoughts.</div>
             )}
-            {selectedDoc && selectedDoc.thoughts.length > 0 && (
+            {selectedDestination && destinationThoughts.length === 0 && (
+              <div className="text-muted-foreground">No thoughts found for this destination.</div>
+            )}
+            {selectedDestination && destinationThoughts.length > 0 && (
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
                 onDragEnd={handleDragEnd}
               >
                 <SortableContext
-                  items={selectedDoc.thoughts.map((t) => t.id)}
+                  items={destinationThoughts.map((t) => t.id)}
                   strategy={verticalListSortingStrategy}
                 >
                   <ul className="flex flex-col gap-2">
-                    {selectedDoc.thoughts.map((thought) => (
+                    {destinationThoughts.map((thought) => (
                       <SortableThoughtItem key={thought.id} thought={thought} />
                     ))}
                   </ul>
