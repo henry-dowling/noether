@@ -1,0 +1,1 @@
+This is for noether, an AI productivity tool for ppl with ADHD
