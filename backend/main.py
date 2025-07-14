@@ -30,6 +30,7 @@ documents_db: List[Document] = []
 
 @app.post("/thoughts/", response_model=Thought)
 def create_thought(thought: Thought):
+    print(f"Received thought: {thought}")  # Debug print
     thoughts_db.append(thought)
     return thought
 
