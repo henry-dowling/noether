@@ -442,215 +442,215 @@ export default function Home() {
   }, [isUserActive]);
 
   return (
-    <div className="min-h-screen flex flex-row bg-background">
-      {/* Spotlight Modal */}
-      {showSpotlight && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" style={{backdropFilter: 'blur(2px)'}}>
-          <div
-            id="spotlight-modal"
-            className="bg-white dark:bg-black/90 rounded-xl shadow-2xl p-6 w-full max-w-md flex flex-col gap-4 border border-border"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="text-lg font-semibold mb-2 text-foreground">New Note</div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                await handleAddNote(spotlightInput);
-              }}
-              className="flex flex-row gap-2"
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      <div className="min-h-screen flex flex-row bg-background">
+        {/* Spotlight Modal */}
+        {showSpotlight && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" style={{backdropFilter: 'blur(2px)'}}>
+            <div
+              id="spotlight-modal"
+              className="bg-white dark:bg-black/90 rounded-xl shadow-2xl p-6 w-full max-w-md flex flex-col gap-4 border border-border"
+              onClick={e => e.stopPropagation()}
             >
-              <textarea
-                ref={spotlightInputRef as any}
-                className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none min-h-[60px] max-h-40"
-                placeholder="Type your note..."
-                value={spotlightInput}
-                onChange={e => setSpotlightInput(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === "Escape") {
-                    setShowSpotlight(false);
-                  }
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    await handleAddNote(spotlightInput);
-                  }
+              <div className="text-lg font-semibold mb-2 text-foreground">New Note</div>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await handleAddNote(spotlightInput);
                 }}
-                autoFocus
-                rows={3}
-              />
-              <Button type="submit" className="shrink-0">Add</Button>
-            </form>
-            <div className="text-xs text-muted-foreground mt-1">Press <kbd>Esc</kbd> to close</div>
+                className="flex flex-row gap-2"
+              >
+                <textarea
+                  ref={spotlightInputRef as any}
+                  className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none min-h-[60px] max-h-40"
+                  placeholder="Type your note..."
+                  value={spotlightInput}
+                  onChange={e => setSpotlightInput(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Escape") {
+                      setShowSpotlight(false);
+                    }
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      await handleAddNote(spotlightInput);
+                    }
+                  }}
+                  autoFocus
+                  rows={3}
+                />
+                <Button type="submit" className="shrink-0">Add</Button>
+              </form>
+              <div className="text-xs text-muted-foreground mt-1">Press <kbd>Esc</kbd> to close</div>
+            </div>
           </div>
-        </div>
-      )}
-      {/* Sidebar */}
-      <aside className="w-72 min-h-screen border-r border-border bg-white dark:bg-black/40 flex flex-col p-4 gap-2">
-        {/* Destinations Section */}
-        <Card className="shadow-none border-none bg-transparent">
-          <CardHeader className="p-0 mb-2">
-            <CardTitle className="text-xl font-bold text-foreground">Lists</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ul className="flex flex-col gap-1">
-              <li>
-                <DestinationDropTarget destination="__all__">
-                  <Button
-                    variant={selectedDestination === "__all__" ? "default" : "ghost"}
-                    className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
-                    onClick={() => setSelectedDestination("__all__")}
-                  >
-                    All Notes
-                  </Button>
-                </DestinationDropTarget>
-              </li>
-              {destinations.length === 0 && (
-                <li className="text-muted-foreground select-none">No destinations</li>
-              )}
-              {destinations.map((destination, index) => (
-                <li key={index}>
-                  <DestinationDropTarget destination={destination}>
+        )}
+        {/* Sidebar */}
+        <aside className="w-72 min-h-screen border-r border-border bg-white dark:bg-black/40 flex flex-col p-4 gap-2">
+          {/* Destinations Section */}
+          <Card className="shadow-none border-none bg-transparent">
+            <CardHeader className="p-0 mb-2">
+              <CardTitle className="text-xl font-bold text-foreground">Lists</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ul className="flex flex-col gap-1">
+                <li>
+                  <DestinationDropTarget destination="__all__">
                     <Button
-                      variant={selectedDestination === destination ? "default" : "ghost"}
-                      className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
-                      onClick={() => {
-                        setSelectedDestination(destination);
-                      }}
+                      variant={selectedDestination === "__all__" ? "default" : "ghost"}
+                      className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
+                      onClick={() => setSelectedDestination("__all__")}
                     >
-                      {destination}
+                      All Notes
                     </Button>
                   </DestinationDropTarget>
                 </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      </aside>
-      {/* Main content */}
-      <main className="flex-1 flex flex-col items-center justify-start px-4 py-12 gap-8">
-        {/* Search Bar */}
-        <div className="w-full max-w-xl flex flex-row items-center gap-2 mb-2">
-          <input
-            type="text"
-            className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder="Search notes here... or press Ctrl-N to add a new note"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-          />
-        </div>
-        {/* Processed Thoughts for selected destination (no Card) */}
-        <div className="w-full max-w-xl flex flex-col gap-4">
-          <div className="text-2xl font-semibold mb-4 text-foreground flex items-center justify-between gap-4">
-            <span>
-              {selectedDestination === "__all__"
-                ? 'All Notes'
-                : selectedDestination
-                  ? `${selectedDestination}`
-                  : 'Notes'}
-            </span>
-            {/* Toggle sort mode button (right side, small, icon) */}
-            <button
-              className="ml-2 p-1.5 rounded border border-border text-muted-foreground bg-background hover:bg-primary/20 hover:text-primary hover:border-primary focus:bg-primary/30 focus:text-primary focus:border-primary transition-colors transition-shadow duration-150 flex items-center justify-center text-base shadow-sm group"
-              style={{ fontSize: '1.1rem' }}
-              onClick={() => setSortMode(sortMode === 'manual' ? 'chronological' : 'manual')}
-              title={sortMode === 'manual' ? 'Switch to reverse chronological order' : 'Switch to manual order'}
-            >
-              {/* Icon matches the current mode */}
-              <span className="transition-transform duration-150 group-hover:rotate-12">
-              {sortMode === 'manual' ? (
-                // Drag/manual order icon
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="5" y="6" width="10" height="2" rx="1" fill="currentColor"/>
-                  <rect x="5" y="12" width="10" height="2" rx="1" fill="currentColor"/>
-                </svg>
-              ) : (
-                // Clock/chronological icon
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" fill="none"/>
-                  <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                </svg>
-              )}
-              </span>
-            </button>
+                {destinations.length === 0 && (
+                  <li className="text-muted-foreground select-none">No destinations</li>
+                )}
+                {destinations.map((destination, index) => (
+                  <li key={index}>
+                    <DestinationDropTarget destination={destination}>
+                      <Button
+                        variant={selectedDestination === destination ? "default" : "ghost"}
+                        className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
+                        onClick={() => {
+                          setSelectedDestination(destination);
+                        }}
+                      >
+                        {destination}
+                      </Button>
+                    </DestinationDropTarget>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        </aside>
+        {/* Main content */}
+        <main className="flex-1 flex flex-col items-center justify-start px-4 py-12 gap-8">
+          {/* Search Bar */}
+          <div className="w-full max-w-xl flex flex-row items-center gap-2 mb-2">
+            <input
+              type="text"
+              className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              placeholder="Search notes here... or press Ctrl-N to add a new note"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
           </div>
-          {/* New note entry box at the top for all destinations, including All Notes */}
-          <form
-            className="mb-4"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              if (selectedDestination === "__all__") {
-                // All Notes: let backend categorize
-                if (newNoteInput.trim()) {
-                  setIsUserActive(true);
-                  const res = await fetch("http://localhost:8000/thoughts/", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ content: newNoteInput.trim() })
-                  });
-                  if (res.ok) {
-                    await refreshProcessedThoughts();
-                    setNewNoteInput("");
-                    newNoteInputRef.current?.focus();
-                    setIsUserActive(false);
-                  } else {
-                    alert("Failed to add note");
-                    setIsUserActive(false);
-                  }
-                }
-              } else {
-                await handleAddNoteToDestination(newNoteInput);
-              }
-            }}
-          >
-            <div className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex flex-col gap-1 group">
-              <textarea
-                ref={newNoteInputRef}
-                className="flex-1 bg-transparent border-none focus:outline-none text-foreground font-medium text-base resize-none min-h-[32px] max-h-32 placeholder:text-muted-foreground"
-                placeholder={selectedDestination === "__all__" ? "Add a note to any list..." : `Add a note to '${selectedDestination}'`}
-                value={newNoteInput}
-                onChange={e => setNewNoteInput(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    if (selectedDestination === "__all__") {
-                      if (newNoteInput.trim()) {
-                        setIsUserActive(true);
-                        const res = await fetch("http://localhost:8000/thoughts/", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ content: newNoteInput.trim() })
-                        });
-                        if (res.ok) {
-                          await refreshProcessedThoughts();
-                          setNewNoteInput("");
-                          newNoteInputRef.current?.focus();
-                          setIsUserActive(false);
-                        } else {
-                          alert("Failed to add note");
-                          setIsUserActive(false);
-                        }
-                      }
+          {/* Processed Thoughts for selected destination (no Card) */}
+          <div className="w-full max-w-xl flex flex-col gap-4">
+            <div className="text-2xl font-semibold mb-4 text-foreground flex items-center justify-between gap-4">
+              <span>
+                {selectedDestination === "__all__"
+                  ? 'All Notes'
+                  : selectedDestination
+                    ? `${selectedDestination}`
+                    : 'Notes'}
+              </span>
+              {/* Toggle sort mode button (right side, small, icon) */}
+              <button
+                className="ml-2 p-1.5 rounded border border-border text-muted-foreground bg-background hover:bg-primary/20 hover:text-primary hover:border-primary focus:bg-primary/30 focus:text-primary focus:border-primary transition-colors transition-shadow duration-150 flex items-center justify-center text-base shadow-sm group"
+                style={{ fontSize: '1.1rem' }}
+                onClick={() => setSortMode(sortMode === 'manual' ? 'chronological' : 'manual')}
+                title={sortMode === 'manual' ? 'Switch to reverse chronological order' : 'Switch to manual order'}
+              >
+                {/* Icon matches the current mode */}
+                <span className="transition-transform duration-150 group-hover:rotate-12">
+                {sortMode === 'manual' ? (
+                  // Drag/manual order icon
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="5" y="6" width="10" height="2" rx="1" fill="currentColor"/>
+                    <rect x="5" y="12" width="10" height="2" rx="1" fill="currentColor"/>
+                  </svg>
+                ) : (
+                  // Clock/chronological icon
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                    <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                )}
+                </span>
+              </button>
+            </div>
+            {/* New note entry box at the top for all destinations, including All Notes */}
+            <form
+              className="mb-4"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (selectedDestination === "__all__") {
+                  // All Notes: let backend categorize
+                  if (newNoteInput.trim()) {
+                    setIsUserActive(true);
+                    const res = await fetch("http://localhost:8000/thoughts/", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ content: newNoteInput.trim() })
+                    });
+                    if (res.ok) {
+                      await refreshProcessedThoughts();
+                      setNewNoteInput("");
+                      newNoteInputRef.current?.focus();
+                      setIsUserActive(false);
                     } else {
-                      await handleAddNoteToDestination(newNoteInput);
+                      alert("Failed to add note");
+                      setIsUserActive(false);
                     }
                   }
-                }}
-                rows={1}
-              />
-            </div>
-          </form>
-          {selectedDestination === null && (
-            <div className="text-muted-foreground">Select a list to view its notes.</div>
-          )}
-          {selectedDestination !== null && filteredThoughts.length === 0 && (
-            <div className="text-muted-foreground">No notes found for this list.</div>
-          )}
-          {selectedDestination !== null && filteredThoughts.length > 0 && (
-            sortMode === 'manual' ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-              >
+                } else {
+                  await handleAddNoteToDestination(newNoteInput);
+                }
+              }}
+            >
+              <div className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex flex-col gap-1 group">
+                <textarea
+                  ref={newNoteInputRef}
+                  className="flex-1 bg-transparent border-none focus:outline-none text-foreground font-medium text-base resize-none min-h-[32px] max-h-32 placeholder:text-muted-foreground"
+                  placeholder={selectedDestination === "__all__" ? "Add a note to any list..." : `Add a note to '${selectedDestination}'`}
+                  value={newNoteInput}
+                  onChange={e => setNewNoteInput(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      if (selectedDestination === "__all__") {
+                        if (newNoteInput.trim()) {
+                          setIsUserActive(true);
+                          const res = await fetch("http://localhost:8000/thoughts/", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ content: newNoteInput.trim() })
+                          });
+                          if (res.ok) {
+                            await refreshProcessedThoughts();
+                            setNewNoteInput("");
+                            newNoteInputRef.current?.focus();
+                            setIsUserActive(false);
+                          } else {
+                            alert("Failed to add note");
+                            setIsUserActive(false);
+                          }
+                        }
+                      } else {
+                        await handleAddNoteToDestination(newNoteInput);
+                      }
+                    }
+                  }}
+                  rows={1}
+                />
+              </div>
+            </form>
+            {selectedDestination === null && (
+              <div className="text-muted-foreground">Select a list to view its notes.</div>
+            )}
+            {selectedDestination !== null && filteredThoughts.length === 0 && (
+              <div className="text-muted-foreground">No notes found for this list.</div>
+            )}
+            {selectedDestination !== null && filteredThoughts.length > 0 && (
+              sortMode === 'manual' ? (
                 <SortableContext
                   items={filteredThoughts.map((t) => t.id)}
                   strategy={verticalListSortingStrategy}
@@ -661,20 +661,20 @@ export default function Home() {
                     ))}
                   </ul>
                 </SortableContext>
-              </DndContext>
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {filteredThoughts.map((thought) => (
-                  <SortableThoughtItem key={thought.id} thought={thought} />
-                ))}
-              </ul>
-            )
-          )}
-        </div>
-        <footer className="mt-auto text-xs text-muted-foreground py-4 text-center opacity-70 w-full">
-          Noether: Think it. Capture it. Organize it.
-        </footer>
-      </main>
-    </div>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {filteredThoughts.map((thought) => (
+                    <SortableThoughtItem key={thought.id} thought={thought} />
+                  ))}
+                </ul>
+              )
+            )}
+          </div>
+          <footer className="mt-auto text-xs text-muted-foreground py-4 text-center opacity-70 w-full">
+            Noether: Think it. Capture it. Organize it.
+          </footer>
+        </main>
+      </div>
+    </DndContext>
   );
 }
