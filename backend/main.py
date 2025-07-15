@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
@@ -38,6 +38,7 @@ class ProcessedThought(BaseModel):
     content: str
     destination: DestinationEnum
     created_at: datetime
+    order: int
 
 class Document(BaseModel):
     id: int
@@ -46,6 +47,8 @@ class Document(BaseModel):
 
 class ThoughtCreate(BaseModel):
     content: str
+    destination: Optional[str] = None  # Allow client to specify destination
+    order: Optional[int] = None        # Allow client to specify order
 
 # --- In-memory storage (for demo purposes) ---
 
@@ -62,9 +65,27 @@ def create_thought(thought: ThoughtCreate):
     new_thought = Thought(id=new_id, content=thought.content, created_at=now)
     print(f"Received thought: {new_thought}")  # Debug print
     thoughts_db.append(new_thought)
-    # Use OpenAI to categorize the thought with Enum
-    destination = categorize_thought_with_openai(new_thought.content)
-    processed = ProcessedThought(id=new_thought.id, content=new_thought.content, destination=destination, created_at=now)
+    # Use provided destination if present, else OpenAI
+    if thought.destination is not None:
+        destination = thought.destination
+    else:
+        destination = categorize_thought_with_openai(new_thought.content)
+    # Use provided order if present, else max+1
+    if thought.order is not None:
+        order = thought.order
+    else:
+        max_order = max(
+            [pt.order for pt in processed_thoughts_db if pt.destination == destination],
+            default=-1
+        )
+        order = max_order + 1
+    processed = ProcessedThought(
+        id=new_thought.id,
+        content=new_thought.content,
+        destination=destination,
+        created_at=now,
+        order=order
+    )
     processed_thoughts_db.append(processed)
     return processed
 
@@ -83,13 +104,20 @@ def process_thought(thought: Thought):
 
 @app.get("/processed_thoughts/", response_model=List[ProcessedThought])
 def list_processed_thoughts():
-    return processed_thoughts_db
+    return sorted(processed_thoughts_db, key=lambda t: (t.destination, t.order))
 
 @app.put("/processed_thoughts/{thought_id}", response_model=ProcessedThought)
 def update_processed_thought(thought_id: int, updated_thought: ProcessedThought):
     for i, thought in enumerate(processed_thoughts_db):
         if thought.id == thought_id:
-            # Preserve the original created_at if not provided
+            # If destination changed, set order to end of new destination
+            if thought.destination != updated_thought.destination:
+                max_order = max(
+                    [pt.order for pt in processed_thoughts_db if pt.destination == updated_thought.destination],
+                    default=-1
+                )
+                updated_thought.order = max_order + 1
+            # Preserve created_at if not provided
             if not hasattr(updated_thought, 'created_at') or updated_thought.created_at is None:
                 updated_thought.created_at = thought.created_at
             processed_thoughts_db[i] = updated_thought
@@ -103,6 +131,20 @@ def delete_processed_thought(thought_id: int):
             del processed_thoughts_db[i]
             return {"message": "Thought deleted successfully"}
     raise HTTPException(status_code=404, detail="Thought not found")
+
+@app.put("/processed_thoughts/reorder/", response_model=List[ProcessedThought])
+def reorder_processed_thoughts(
+    destination: str = Body(...),
+    ordered_ids: List[int] = Body(...)
+):
+    # Only reorder thoughts in the given destination
+    reordered = []
+    for idx, thought_id in enumerate(ordered_ids):
+        for t in processed_thoughts_db:
+            if t.id == thought_id and t.destination == destination:
+                t.order = idx
+                reordered.append(t)
+    return reordered
 
 @app.post("/documents/", response_model=Document)
 def create_document(label: str, thought_ids: List[int]):

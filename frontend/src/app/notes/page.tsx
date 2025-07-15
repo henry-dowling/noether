@@ -27,6 +27,7 @@ interface ProcessedThought {
   content: string;
   destination: string;
   created_at: string;
+  order: number;
 }
 
 interface Document {
@@ -66,16 +67,31 @@ export default function Home() {
   // Search bar state
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Get thoughts for selected destination
+  // Add state for new note input at the bottom
+  const [newNoteInput, setNewNoteInput] = useState("");
+  const newNoteInputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Add state for sorting mode
+  const [sortMode, setSortMode] = useState<'manual' | 'chronological'>('manual');
+
+  // Get thoughts for selected destination, sorted by chosen mode
   const destinationThoughts = selectedDestination === "__all__"
     ? processedThoughts
     : selectedDestination
       ? processedThoughts.filter(thought => thought.destination === selectedDestination)
       : [];
+  let sortedDestinationThoughts: ProcessedThought[];
+  if (sortMode === 'manual') {
+    // Manual order (drag-and-drop)
+    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => b.order - a.order);
+  } else {
+    // Reverse chronological
+    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }
   // Filtered by search
   const filteredThoughts = searchQuery.trim() === ""
-    ? destinationThoughts
-    : destinationThoughts.filter(thought =>
+    ? sortedDestinationThoughts
+    : sortedDestinationThoughts.filter(thought =>
         thought.content.toLowerCase().includes(searchQuery.trim().toLowerCase())
       );
 
@@ -89,33 +105,49 @@ export default function Home() {
   );
 
   // Handle drag end for thoughts
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    
     if (!over || active.id === over.id) return;
-    
-    const activeThought = destinationThoughts.find(t => t.id === active.id);
-    const overThought = destinationThoughts.find(t => t.id === over.id);
-    
-    if (!activeThought || !overThought) return;
-    
-    const oldIndex = destinationThoughts.findIndex((t) => t.id === active.id);
-    const newIndex = destinationThoughts.findIndex((t) => t.id === over.id);
-    
+
+    // If dropped on a destination (sidebar)
+    if (over.id && typeof over.id === 'string' && destinations.includes(over.id)) {
+      const thought = processedThoughts.find(t => t.id === active.id);
+      if (!thought) return;
+      // Update backend with new destination
+      await fetch(`http://localhost:8000/processed_thoughts/${thought.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...thought, destination: over.id })
+      });
+      await refreshProcessedThoughts();
+      return;
+    }
+
+    // Reordering within a destination
+    const oldIndex = sortedDestinationThoughts.findIndex((t) => t.id === active.id);
+    const newIndex = sortedDestinationThoughts.findIndex((t) => t.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
-    
-    // Set user as active during drag operation
-    setIsUserActive(true);
-    
-    // For destination view, we'll just reorder the display
-    // The actual reordering would need to be handled by the backend
-    // For now, we'll just update the display order
-    const newThoughts = arrayMove(destinationThoughts, oldIndex, newIndex);
-    // Note: This is a simplified implementation for destination view
-    // In a real app, you'd want to persist the order to the backend
-    
-    // Clear user activity after a short delay to allow for the drag to complete
-    setTimeout(() => setIsUserActive(false), 1000);
+
+    const newThoughts = arrayMove(sortedDestinationThoughts, oldIndex, newIndex);
+
+    // Assign highest order to top, descending
+    const maxOrder = newThoughts.length > 0 ? Math.max(...newThoughts.map(t => t.order)) : 0;
+    const ordered_ids = newThoughts.map((t, idx) => ({ id: t.id, order: maxOrder - idx }));
+
+    // Send new order to backend
+    await Promise.all(ordered_ids.map(async ({ id, order }) => {
+      const thought = processedThoughts.find(t => t.id === id);
+      if (thought) {
+        await fetch(`http://localhost:8000/processed_thoughts/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...thought, order })
+        });
+      }
+    }));
+
+    // Refresh from backend
+    await refreshProcessedThoughts();
   };
 
   // Handle edit
@@ -191,6 +223,30 @@ export default function Home() {
     }
   };
 
+  // Add note to specific destination
+  const handleAddNoteToDestination = async (content: string) => {
+    if (!selectedDestination || selectedDestination === "__all__") return;
+    if (content.trim()) {
+      setIsUserActive(true);
+      const res = await fetch("http://localhost:8000/thoughts/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content: content.trim(), destination: selectedDestination })
+      });
+      if (res.ok) {
+        await refreshProcessedThoughts();
+        setNewNoteInput("");
+        newNoteInputRef.current?.focus();
+        setIsUserActive(false);
+      } else {
+        alert("Failed to add note");
+        setIsUserActive(false);
+      }
+    }
+  };
+
   // Sortable Thought Item
   function SortableThoughtItem({ thought }: { thought: ProcessedThought }) {
     const {
@@ -263,6 +319,23 @@ export default function Home() {
           </button>
         </div>
       </li>
+    );
+  }
+
+  // Highlight destination on drag-over
+  function DestinationDropTarget({ destination, children }: { destination: string, children: React.ReactNode }) {
+    const { setNodeRef, isOver } = require('@dnd-kit/core').useDroppable({ id: destination });
+    return (
+      <div
+        ref={setNodeRef}
+        className={
+          isOver
+            ? 'ring-2 ring-primary ring-offset-2 bg-primary/10 transition-all duration-150'
+            : ''
+        }
+      >
+        {children}
+      </div>
     );
   }
 
@@ -420,28 +493,32 @@ export default function Home() {
           <CardContent className="p-0">
             <ul className="flex flex-col gap-1">
               <li>
-                <Button
-                  variant={selectedDestination === "__all__" ? "default" : "ghost"}
-                  className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
-                  onClick={() => setSelectedDestination("__all__")}
-                >
-                  All Notes
-                </Button>
+                <DestinationDropTarget destination="__all__">
+                  <Button
+                    variant={selectedDestination === "__all__" ? "default" : "ghost"}
+                    className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
+                    onClick={() => setSelectedDestination("__all__")}
+                  >
+                    All Notes
+                  </Button>
+                </DestinationDropTarget>
               </li>
               {destinations.length === 0 && (
                 <li className="text-muted-foreground select-none">No destinations</li>
               )}
               {destinations.map((destination, index) => (
                 <li key={index}>
-                  <Button
-                    variant={selectedDestination === destination ? "default" : "ghost"}
-                    className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
-                    onClick={() => {
-                      setSelectedDestination(destination);
-                    }}
-                  >
-                    {destination}
-                  </Button>
+                  <DestinationDropTarget destination={destination}>
+                    <Button
+                      variant={selectedDestination === destination ? "default" : "ghost"}
+                      className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
+                      onClick={() => {
+                        setSelectedDestination(destination);
+                      }}
+                    >
+                      {destination}
+                    </Button>
+                  </DestinationDropTarget>
                 </li>
               ))}
             </ul>
@@ -455,20 +532,112 @@ export default function Home() {
           <input
             type="text"
             className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            placeholder="Search notes..."
+            placeholder="Search notes here... or press Ctrl-N to add a new note"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
         {/* Processed Thoughts for selected destination (no Card) */}
         <div className="w-full max-w-xl flex flex-col gap-4">
-          <div className="text-2xl font-semibold mb-4 text-foreground">
-            {selectedDestination === "__all__"
-              ? 'All Notes'
-              : selectedDestination
-                ? `${selectedDestination}`
-                : 'Notes'}
+          <div className="text-2xl font-semibold mb-4 text-foreground flex items-center justify-between gap-4">
+            <span>
+              {selectedDestination === "__all__"
+                ? 'All Notes'
+                : selectedDestination
+                  ? `${selectedDestination}`
+                  : 'Notes'}
+            </span>
+            {/* Toggle sort mode button (right side, small, icon) */}
+            <button
+              className="ml-2 p-1.5 rounded border border-border text-muted-foreground bg-background hover:bg-primary/20 hover:text-primary hover:border-primary focus:bg-primary/30 focus:text-primary focus:border-primary transition-colors transition-shadow duration-150 flex items-center justify-center text-base shadow-sm group"
+              style={{ fontSize: '1.1rem' }}
+              onClick={() => setSortMode(sortMode === 'manual' ? 'chronological' : 'manual')}
+              title={sortMode === 'manual' ? 'Switch to reverse chronological order' : 'Switch to manual order'}
+            >
+              {/* Icon matches the current mode */}
+              <span className="transition-transform duration-150 group-hover:rotate-12">
+              {sortMode === 'manual' ? (
+                // Drag/manual order icon
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="5" y="6" width="10" height="2" rx="1" fill="currentColor"/>
+                  <rect x="5" y="12" width="10" height="2" rx="1" fill="currentColor"/>
+                </svg>
+              ) : (
+                // Clock/chronological icon
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+                  <path d="M10 6v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              )}
+              </span>
+            </button>
           </div>
+          {/* New note entry box at the top for all destinations, including All Notes */}
+          <form
+            className="mb-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (selectedDestination === "__all__") {
+                // All Notes: let backend categorize
+                if (newNoteInput.trim()) {
+                  setIsUserActive(true);
+                  const res = await fetch("http://localhost:8000/thoughts/", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: newNoteInput.trim() })
+                  });
+                  if (res.ok) {
+                    await refreshProcessedThoughts();
+                    setNewNoteInput("");
+                    newNoteInputRef.current?.focus();
+                    setIsUserActive(false);
+                  } else {
+                    alert("Failed to add note");
+                    setIsUserActive(false);
+                  }
+                }
+              } else {
+                await handleAddNoteToDestination(newNoteInput);
+              }
+            }}
+          >
+            <div className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex flex-col gap-1 group">
+              <textarea
+                ref={newNoteInputRef}
+                className="flex-1 bg-transparent border-none focus:outline-none text-foreground font-medium text-base resize-none min-h-[32px] max-h-32 placeholder:text-muted-foreground"
+                placeholder={selectedDestination === "__all__" ? "Add a note to any list..." : `Add a note to '${selectedDestination}'`}
+                value={newNoteInput}
+                onChange={e => setNewNoteInput(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (selectedDestination === "__all__") {
+                      if (newNoteInput.trim()) {
+                        setIsUserActive(true);
+                        const res = await fetch("http://localhost:8000/thoughts/", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ content: newNoteInput.trim() })
+                        });
+                        if (res.ok) {
+                          await refreshProcessedThoughts();
+                          setNewNoteInput("");
+                          newNoteInputRef.current?.focus();
+                          setIsUserActive(false);
+                        } else {
+                          alert("Failed to add note");
+                          setIsUserActive(false);
+                        }
+                      }
+                    } else {
+                      await handleAddNoteToDestination(newNoteInput);
+                    }
+                  }
+                }}
+                rows={1}
+              />
+            </div>
+          </form>
           {selectedDestination === null && (
             <div className="text-muted-foreground">Select a list to view its notes.</div>
           )}
@@ -476,22 +645,30 @@ export default function Home() {
             <div className="text-muted-foreground">No notes found for this list.</div>
           )}
           {selectedDestination !== null && filteredThoughts.length > 0 && (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext
-                items={filteredThoughts.map((t) => t.id)}
-                strategy={verticalListSortingStrategy}
+            sortMode === 'manual' ? (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
               >
-                <ul className="flex flex-col gap-2">
-                  {filteredThoughts.map((thought) => (
-                    <SortableThoughtItem key={thought.id} thought={thought} />
-                  ))}
-                </ul>
-              </SortableContext>
-            </DndContext>
+                <SortableContext
+                  items={filteredThoughts.map((t) => t.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <ul className="flex flex-col gap-2">
+                    {filteredThoughts.map((thought) => (
+                      <SortableThoughtItem key={thought.id} thought={thought} />
+                    ))}
+                  </ul>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {filteredThoughts.map((thought) => (
+                  <SortableThoughtItem key={thought.id} thought={thought} />
+                ))}
+              </ul>
+            )
           )}
         </div>
         <footer className="mt-auto text-xs text-muted-foreground py-4 text-center opacity-70 w-full">
