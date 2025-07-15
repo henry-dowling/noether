@@ -1,0 +1,5 @@
+# allow_public_iam.yaml
+name: projects/188027512725/policies/iam.allowedPolicyMemberDomains
+spec:
+  rules:
+  - allowAll: true 
