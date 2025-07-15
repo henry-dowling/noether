@@ -160,7 +160,11 @@ export default function Home() {
   const saveEdit = async (thought: ProcessedThought) => {
     try {
       // Update thought in backend
-      const res = await fetch(`http://localhost:8000/processed_thoughts/${thought.id}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      const res = await fetch(`${API_URL}/processed_thoughts/${thought.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -192,7 +196,11 @@ export default function Home() {
   const deleteThought = async (thoughtId: number) => {
     try {
       // Delete thought from backend
-      const res = await fetch(`http://localhost:8000/processed_thoughts/${thoughtId}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      const res = await fetch(`${API_URL}/processed_thoughts/${thoughtId}`, {
         method: "DELETE",
       });
       
@@ -211,7 +219,11 @@ export default function Home() {
   // Function to refresh processed thoughts from backend
   const refreshProcessedThoughts = async () => {
     try {
-      const res = await fetch("http://localhost:8000/processed_thoughts/");
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      const res = await fetch(`${API_URL}/processed_thoughts/`);
       if (res.ok) {
         const data = await res.json();
         setProcessedThoughts(data);
@@ -344,7 +356,13 @@ export default function Home() {
     async (content: string) => {
       if (content.trim()) {
         setIsUserActive(true);
-        const res = await fetch("http://localhost:8000/thoughts/", {
+
+        const API_URL = process.env.NEXT_PUBLIC_API_URL;
+        if (!API_URL) {
+          throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+        }
+
+        const res = await fetch(`${API_URL}/thoughts/`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -402,13 +420,21 @@ export default function Home() {
   // Fetch data from backend 
   useEffect(() => {
     // Fetch allowed destinations from backend
-    fetch("http://localhost:8000/destinations/")
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) {
+      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+    }
+    fetch(`${API_URL}/destinations/`)
       .then(res => res.json())
       .then(data => setDestinations(data))
       .catch(err => console.error("Failed to fetch destinations:", err));
     
     // Fetch existing notes from backend on mount
-    fetch("http://localhost:8000/thoughts/")
+    const API_URL_NOTES = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL_NOTES) {
+      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+    }
+    fetch(`${API_URL_NOTES}/thoughts/`)
       .then(res => res.json())
       .then(data => setNotes(data))
       .catch(err => console.error("Failed to fetch thoughts:", err));
@@ -417,7 +443,11 @@ export default function Home() {
     setErrorThoughts(null);
 
     // Fetch processed thoughts from backend
-    fetch("http://localhost:8000/processed_thoughts/")
+    const API_URL_PROCESSED = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL_PROCESSED) {
+      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+    }
+    fetch(`${API_URL_PROCESSED}/processed_thoughts/`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch processed thoughts");
         return res.json();
