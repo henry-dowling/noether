@@ -1,12 +1,14 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 import os
-import openai
 from dotenv import load_dotenv
 from datetime import datetime
+from db import Base, engine, SessionLocal
+from models import Thought as ThoughtModel, ProcessedThought as ProcessedThoughtModel, DestinationEnum, Document
+from openai import OpenAI
 
 load_dotenv()
 
@@ -19,6 +21,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create all tables
+Base.metadata.create_all(bind=engine)
 
 # --- Models ---
 
@@ -52,19 +57,24 @@ class ThoughtCreate(BaseModel):
 
 # --- In-memory storage (for demo purposes) ---
 
-thoughts_db: List[Thought] = []
-processed_thoughts_db: List[ProcessedThought] = []
-documents_db: List[Document] = []
-
 # --- Endpoints ---
 
+# Dependency to get DB session
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @app.post("/thoughts/", response_model=ProcessedThought)
-def create_thought(thought: ThoughtCreate):
-    new_id = (thoughts_db[-1].id + 1) if thoughts_db else 1
+def create_thought(thought: ThoughtCreate, db: SessionLocal = Depends(get_db)):
     now = datetime.utcnow()
-    new_thought = Thought(id=new_id, content=thought.content, created_at=now)
-    print(f"Received thought: {new_thought}")  # Debug print
-    thoughts_db.append(new_thought)
+    new_thought = ThoughtModel(content=thought.content, created_at=now)
+    db.add(new_thought)
+    db.commit()
+    db.refresh(new_thought)
     # Use provided destination if present, else OpenAI
     if thought.destination is not None:
         destination = thought.destination
@@ -74,90 +84,100 @@ def create_thought(thought: ThoughtCreate):
     if thought.order is not None:
         order = thought.order
     else:
-        max_order = max(
-            [pt.order for pt in processed_thoughts_db if pt.destination == destination],
-            default=-1
-        )
-        order = max_order + 1
-    processed = ProcessedThought(
+        max_order = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.destination == destination).order_by(ProcessedThoughtModel.order.desc()).first()
+        order = (max_order.order + 1) if max_order else 0
+    processed = ProcessedThoughtModel(
         id=new_thought.id,
         content=new_thought.content,
         destination=destination,
         created_at=now,
         order=order
     )
-    processed_thoughts_db.append(processed)
+    db.add(processed)
+    db.commit()
+    db.refresh(processed)
     return processed
 
 @app.get("/thoughts/", response_model=List[Thought])
-def list_thoughts():
-    return thoughts_db
+def list_thoughts(db: SessionLocal = Depends(get_db)):
+    return db.query(ThoughtModel).all()
 
 @app.post("/processed_thoughts/", response_model=ProcessedThought)
-def process_thought(thought: Thought):
+def process_thought(thought: Thought, db: SessionLocal = Depends(get_db)):
     # Placeholder: In reality, call OpenAI to label the thought
     destination = "example_destination"  # Dummy label
     now = getattr(thought, 'created_at', datetime.utcnow())
-    processed = ProcessedThought(id=thought.id, content=thought.content, destination=destination, created_at=now)
-    processed_thoughts_db.append(processed)
+    processed = ProcessedThoughtModel(id=thought.id, content=thought.content, destination=destination, created_at=now, order=0)
+    db.add(processed)
+    db.commit()
+    db.refresh(processed)
     return processed
 
 @app.get("/processed_thoughts/", response_model=List[ProcessedThought])
-def list_processed_thoughts():
-    return sorted(processed_thoughts_db, key=lambda t: (t.destination, t.order))
+def list_processed_thoughts(db: SessionLocal = Depends(get_db)):
+    return db.query(ProcessedThoughtModel).order_by(ProcessedThoughtModel.destination, ProcessedThoughtModel.order).all()
 
 @app.put("/processed_thoughts/{thought_id}", response_model=ProcessedThought)
-def update_processed_thought(thought_id: int, updated_thought: ProcessedThought):
-    for i, thought in enumerate(processed_thoughts_db):
-        if thought.id == thought_id:
-            # If destination changed, set order to end of new destination
-            if thought.destination != updated_thought.destination:
-                max_order = max(
-                    [pt.order for pt in processed_thoughts_db if pt.destination == updated_thought.destination],
-                    default=-1
-                )
-                updated_thought.order = max_order + 1
-            # Preserve created_at if not provided
-            if not hasattr(updated_thought, 'created_at') or updated_thought.created_at is None:
-                updated_thought.created_at = thought.created_at
-            processed_thoughts_db[i] = updated_thought
-            return updated_thought
-    raise HTTPException(status_code=404, detail="Thought not found")
+def update_processed_thought(thought_id: int, updated_thought: ProcessedThought, db: SessionLocal = Depends(get_db)):
+    processed_thought = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.id == thought_id).first()
+    if not processed_thought:
+        raise HTTPException(status_code=404, detail="Thought not found")
+
+    # If destination changed, set order to end of new destination
+    if processed_thought.destination != updated_thought.destination:
+        max_order = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.destination == updated_thought.destination).order_by(ProcessedThoughtModel.order.desc()).first()
+        updated_thought.order = (max_order.order + 1) if max_order else 0
+
+    # Preserve created_at if not provided
+    if not hasattr(updated_thought, 'created_at') or updated_thought.created_at is None:
+        updated_thought.created_at = processed_thought.created_at
+
+    for key, value in updated_thought.dict(exclude_unset=True).items():
+        setattr(processed_thought, key, value)
+
+    db.commit()
+    db.refresh(processed_thought)
+    return processed_thought
 
 @app.delete("/processed_thoughts/{thought_id}")
-def delete_processed_thought(thought_id: int):
-    for i, thought in enumerate(processed_thoughts_db):
-        if thought.id == thought_id:
-            del processed_thoughts_db[i]
-            return {"message": "Thought deleted successfully"}
-    raise HTTPException(status_code=404, detail="Thought not found")
+def delete_processed_thought(thought_id: int, db: SessionLocal = Depends(get_db)):
+    processed_thought = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.id == thought_id).first()
+    if not processed_thought:
+        raise HTTPException(status_code=404, detail="Thought not found")
+    db.delete(processed_thought)
+    db.commit()
+    return {"message": "Thought deleted successfully"}
 
 @app.put("/processed_thoughts/reorder/", response_model=List[ProcessedThought])
 def reorder_processed_thoughts(
     destination: str = Body(...),
-    ordered_ids: List[int] = Body(...)
+    ordered_ids: List[int] = Body(...),
+    db: SessionLocal = Depends(get_db)
 ):
     # Only reorder thoughts in the given destination
     reordered = []
     for idx, thought_id in enumerate(ordered_ids):
-        for t in processed_thoughts_db:
-            if t.id == thought_id and t.destination == destination:
-                t.order = idx
-                reordered.append(t)
+        processed_thought = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.id == thought_id, ProcessedThoughtModel.destination == destination).first()
+        if processed_thought:
+            processed_thought.order = idx
+            reordered.append(processed_thought)
+    db.commit()
     return reordered
 
 @app.post("/documents/", response_model=Document)
-def create_document(label: str, thought_ids: List[int]):
-    selected_thoughts = [pt for pt in processed_thoughts_db if pt.id in thought_ids]
+def create_document(label: str, thought_ids: List[int], db: SessionLocal = Depends(get_db)):
+    selected_thoughts = db.query(ProcessedThoughtModel).filter(ProcessedThoughtModel.id.in_(thought_ids)).all()
     if not selected_thoughts:
         raise HTTPException(status_code=404, detail="No processed thoughts found for given IDs")
-    doc = Document(id=len(documents_db)+1, label=label, thoughts=selected_thoughts)
-    documents_db.append(doc)
+    doc = Document(id=None, label=label, thoughts=selected_thoughts)
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
     return doc
 
 @app.get("/documents/", response_model=List[Document])
-def list_documents():
-    return documents_db
+def list_documents(db: SessionLocal = Depends(get_db)):
+    return db.query(Document).all()
 
 @app.get("/destinations/", response_model=List[str])
 def get_destinations():
@@ -173,7 +193,7 @@ def categorize_thought_with_openai(content: str) -> DestinationEnum:
         f"Return only the category name.\nThought: '{content}'\nCategory:"
     )
     try:
-        client = openai.OpenAI(api_key=api_key)
+        client = OpenAI(api_key=api_key)  # No proxies argument!
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
