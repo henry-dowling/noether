@@ -96,7 +96,11 @@ export default function Home() {
       const thought = processedThoughts.find(t => t.id === active.id);
       if (!thought) return;
       // Update backend with new destination
-      await fetch(`http://localhost:8000/processed_thoughts/${thought.id}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      await fetch(`${API_URL}/processed_thoughts/${thought.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...thought, destination: over.id })
@@ -120,7 +124,11 @@ export default function Home() {
     await Promise.all(ordered_ids.map(async ({ id, order }) => {
       const thought = processedThoughts.find(t => t.id === id);
       if (thought) {
-        await fetch(`http://localhost:8000/processed_thoughts/${id}`, {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL;
+        if (!API_URL) {
+          throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+        }
+        await fetch(`${API_URL}/processed_thoughts/${id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...thought, order })
@@ -222,7 +230,11 @@ export default function Home() {
     if (!selectedDestination || selectedDestination === "__all__") return;
     if (content.trim()) {
       setIsUserActive(true);
-      const res = await fetch("http://localhost:8000/thoughts/", {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      const res = await fetch(`${API_URL}/thoughts/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -570,7 +582,11 @@ export default function Home() {
                   // All Notes: let backend categorize
                   if (newNoteInput.trim()) {
                     setIsUserActive(true);
-                    const res = await fetch("http://localhost:8000/thoughts/", {
+                    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+                    if (!API_URL) {
+                      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+                    }
+                    const res = await fetch(`${API_URL}/thoughts/`, {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ content: newNoteInput.trim() })
@@ -603,7 +619,11 @@ export default function Home() {
                       if (selectedDestination === "__all__") {
                         if (newNoteInput.trim()) {
                           setIsUserActive(true);
-                          const res = await fetch("http://localhost:8000/thoughts/", {
+                          const API_URL = process.env.NEXT_PUBLIC_API_URL;
+                          if (!API_URL) {
+                            throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+                          }
+                          const res = await fetch(`${API_URL}/thoughts/`, {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ content: newNoteInput.trim() })

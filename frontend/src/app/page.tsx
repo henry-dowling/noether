@@ -17,7 +17,11 @@ export default function Home() {
 
   useEffect(() => {
     // Fetch processed thoughts from backend on mount
-    fetch("http://localhost:8000/processed_thoughts/")
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) {
+      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+    }
+    fetch(`${API_URL}/processed_thoughts/`)
       .then(res => res.json())
       .then(data => setNotes(data));
   }, []);
@@ -25,7 +29,11 @@ export default function Home() {
   // Polling effect to refresh notes every 5 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      fetch("http://localhost:8000/processed_thoughts/")
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      fetch(`${API_URL}/processed_thoughts/`)
         .then(res => res.json())
         .then(data => setNotes(data));
     }, 5000);
@@ -36,14 +44,18 @@ export default function Home() {
     e.preventDefault();
     if (input.trim()) {
       // POST to backend
-      const res = await fetch("http://localhost:8000/thoughts/", {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL;
+      if (!API_URL) {
+        throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+      }
+      const res = await fetch(`${API_URL}/thoughts/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: input.trim() })
       });
       if (res.ok) {
         // Refresh the processed thoughts to get the latest data
-        fetch("http://localhost:8000/processed_thoughts/")
+        fetch(`${API_URL}/processed_thoughts/`)
           .then(res => res.json())
           .then(data => setNotes(data));
         setInput("");
@@ -57,12 +69,16 @@ export default function Home() {
 
   async function deleteNote(id: number) {
     // Delete from backend
-    const res = await fetch(`http://localhost:8000/processed_thoughts/${id}`, {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL;
+    if (!API_URL) {
+      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
+    }
+    const res = await fetch(`${API_URL}/processed_thoughts/${id}`, {
       method: "DELETE",
     });
     if (res.ok) {
       // Refresh the processed thoughts to get the latest data
-      fetch("http://localhost:8000/processed_thoughts/")
+      fetch(`${API_URL}/processed_thoughts/`)
         .then(res => res.json())
         .then(data => setNotes(data));
     } else {
