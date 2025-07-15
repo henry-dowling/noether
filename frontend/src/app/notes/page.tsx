@@ -327,7 +327,7 @@ export default function Home() {
             setMoveModal({ open: true, thought });
           }, 500);
         }}
-        onTouchEnd={(e) => {
+        onTouchEnd={() => {
           if (longPressTimeout.current) clearTimeout(longPressTimeout.current);
         }}
         {...(!isMobile ? listeners : {})}
@@ -379,8 +379,7 @@ export default function Home() {
                 `ml-2 text-gray-400 hover:text-gray-600 text-lg font-bold px-2 py-0.5 rounded focus:outline-none transition-opacity duration-150 delete-button opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`
               }
               title="Delete thought"
-              onClick={async (e) => {
-                e.stopPropagation();
+              onClick={async () => {
                 await deleteThought(thought.id);
               }}
             >
@@ -519,7 +518,7 @@ export default function Home() {
     }, 5000); // Refresh every 5 seconds
 
     return () => clearInterval(interval);
-  }, [isUserActive]);
+  }, [isUserActive, refreshProcessedThoughts]);
 
   return (
     <DndContext
@@ -610,8 +609,8 @@ export default function Home() {
                 {destinations.length === 0 && (
                   <li className="text-muted-foreground select-none">No destinations</li>
                 )}
-                {destinations.map((destination, index) => (
-                  <li key={index}>
+                {destinations.map((destination) => (
+                  <li key={destination}>
                     <DestinationDropTarget destination={destination}>
                       <Button
                         variant={selectedDestination === destination ? "default" : "ghost"}
@@ -661,8 +660,8 @@ export default function Home() {
                     {destinations.length === 0 && (
                       <li className="text-muted-foreground select-none">No destinations</li>
                     )}
-                    {destinations.map((destination, index) => (
-                      <li key={index}>
+                    {destinations.map((destination) => (
+                      <li key={destination}>
                         <DestinationDropTarget destination={destination}>
                           <Button
                             variant={selectedDestination === destination ? "default" : "ghost"}
@@ -847,7 +846,7 @@ export default function Home() {
             <div className="w-full bg-white dark:bg-black/90 rounded-t-2xl p-4 pb-8 shadow-2xl border-t border-border" onClick={e => e.stopPropagation()}>
               <div className="text-lg font-semibold mb-4 text-foreground text-center">Move to...</div>
               <ul className="flex flex-col gap-2">
-                {destinations.map((destination, idx) => (
+                {destinations.map((destination) => (
                   <li key={destination}>
                     <button
                       className={`w-full px-4 py-2 rounded text-left ${moveModal.thought && moveModal.thought.destination === destination ? 'bg-primary text-background' : 'hover:bg-primary/10'}`}
