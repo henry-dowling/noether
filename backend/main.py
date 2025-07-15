@@ -6,6 +6,7 @@ from enum import Enum
 import os
 import openai
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -24,6 +25,7 @@ app.add_middleware(
 class Thought(BaseModel):
     id: int
     content: str
+    created_at: datetime
 
 class DestinationEnum(str, Enum):
     reading_list = "Reading list"
@@ -35,6 +37,7 @@ class ProcessedThought(BaseModel):
     id: int
     content: str
     destination: DestinationEnum
+    created_at: datetime
 
 class Document(BaseModel):
     id: int
@@ -55,12 +58,13 @@ documents_db: List[Document] = []
 @app.post("/thoughts/", response_model=ProcessedThought)
 def create_thought(thought: ThoughtCreate):
     new_id = (thoughts_db[-1].id + 1) if thoughts_db else 1
-    new_thought = Thought(id=new_id, content=thought.content)
+    now = datetime.utcnow()
+    new_thought = Thought(id=new_id, content=thought.content, created_at=now)
     print(f"Received thought: {new_thought}")  # Debug print
     thoughts_db.append(new_thought)
     # Use OpenAI to categorize the thought with Enum
     destination = categorize_thought_with_openai(new_thought.content)
-    processed = ProcessedThought(id=new_thought.id, content=new_thought.content, destination=destination)
+    processed = ProcessedThought(id=new_thought.id, content=new_thought.content, destination=destination, created_at=now)
     processed_thoughts_db.append(processed)
     return processed
 
@@ -72,7 +76,8 @@ def list_thoughts():
 def process_thought(thought: Thought):
     # Placeholder: In reality, call OpenAI to label the thought
     destination = "example_destination"  # Dummy label
-    processed = ProcessedThought(id=thought.id, content=thought.content, destination=destination)
+    now = getattr(thought, 'created_at', datetime.utcnow())
+    processed = ProcessedThought(id=thought.id, content=thought.content, destination=destination, created_at=now)
     processed_thoughts_db.append(processed)
     return processed
 
@@ -84,6 +89,9 @@ def list_processed_thoughts():
 def update_processed_thought(thought_id: int, updated_thought: ProcessedThought):
     for i, thought in enumerate(processed_thoughts_db):
         if thought.id == thought_id:
+            # Preserve the original created_at if not provided
+            if not hasattr(updated_thought, 'created_at') or updated_thought.created_at is None:
+                updated_thought.created_at = thought.created_at
             processed_thoughts_db[i] = updated_thought
             return updated_thought
     raise HTTPException(status_code=404, detail="Thought not found")

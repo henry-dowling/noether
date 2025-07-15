@@ -2,15 +2,16 @@
 
 import { useState, useRef, useEffect } from "react";
 
-// Define the Thought type to match backend
-interface Thought {
+// Define the ProcessedThought type to match backend
+interface ProcessedThought {
   id: number;
   content: string;
-  destination: string; // Now dynamic, fetched from backend
+  destination: string;
+  created_at: string;
 }
 
 export default function Home() {
-  const [notes, setNotes] = useState<Thought[]>([]);
+  const [notes, setNotes] = useState<ProcessedThought[]>([]);
   const [input, setInput] = useState("");
   const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -20,10 +21,20 @@ export default function Home() {
     fetch("http://localhost:8000/destinations/")
       .then(res => res.json())
       .then(data => setDestinations(data));
-    // Fetch existing notes from backend on mount
-    fetch("http://localhost:8000/thoughts/")
+    // Fetch processed thoughts from backend on mount
+    fetch("http://localhost:8000/processed_thoughts/")
       .then(res => res.json())
       .then(data => setNotes(data));
+  }, []);
+
+  // Polling effect to refresh notes every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch("http://localhost:8000/processed_thoughts/")
+        .then(res => res.json())
+        .then(data => setNotes(data));
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   async function addNote(e: React.FormEvent) {
@@ -36,8 +47,12 @@ export default function Home() {
         body: JSON.stringify({ content: input.trim() })
       });
       if (res.ok) {
-        const newThought: Thought = await res.json();
-        setNotes([newThought, ...notes]);
+        // The backend returns a ProcessedThought
+        const newProcessedThought: ProcessedThought = await res.json();
+        // Refresh the processed thoughts to get the latest data
+        fetch("http://localhost:8000/processed_thoughts/")
+          .then(res => res.json())
+          .then(data => setNotes(data));
         setInput("");
         inputRef.current?.focus();
       } else {
@@ -47,8 +62,19 @@ export default function Home() {
     }
   }
 
-  function deleteNote(idx: number) {
-    setNotes(notes.filter((_, i) => i !== idx));
+  async function deleteNote(id: number) {
+    // Delete from backend
+    const res = await fetch(`http://localhost:8000/processed_thoughts/${id}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      // Refresh the processed thoughts to get the latest data
+      fetch("http://localhost:8000/processed_thoughts/")
+        .then(res => res.json())
+        .then(data => setNotes(data));
+    } else {
+      alert("Failed to delete note");
+    }
   }
 
   return (
@@ -77,7 +103,7 @@ export default function Home() {
         {notes.length === 0 && (
           <li className="text-center text-muted-foreground py-8 select-none">No notes yet. Add your first note above!</li>
         )}
-        {notes.map((note, idx) => (
+        {notes.map((note) => (
           <li
             key={note.id}
             className="flex items-center justify-between bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm group hover:shadow-md transition"
@@ -89,7 +115,7 @@ export default function Home() {
               </span>
             </div>
             <button
-              onClick={() => deleteNote(idx)}
+              onClick={() => deleteNote(note.id)}
               className="opacity-60 group-hover:opacity-100 text-red-500 hover:text-red-700 transition ml-2"
               aria-label="Delete note"
               title="Delete note"

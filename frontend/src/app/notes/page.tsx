@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Separator } from "../../components/ui/separator";
@@ -26,6 +26,7 @@ interface ProcessedThought {
   id: number;
   content: string;
   destination: string;
+  created_at: string;
 }
 
 interface Document {
@@ -55,13 +56,28 @@ export default function Home() {
   const [editValue, setEditValue] = useState("");
 
   // Destination view state
-  const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<string | null>("__all__");
   const [isUserActive, setIsUserActive] = useState(false);
 
+  // Spotlight modal state
+  const [showSpotlight, setShowSpotlight] = useState(false);
+  const [spotlightInput, setSpotlightInput] = useState("");
+  const spotlightInputRef = useRef<HTMLInputElement>(null);
+  // Search bar state
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Get thoughts for selected destination
-  const destinationThoughts = selectedDestination 
-    ? processedThoughts.filter(thought => thought.destination === selectedDestination)
-    : [];
+  const destinationThoughts = selectedDestination === "__all__"
+    ? processedThoughts
+    : selectedDestination
+      ? processedThoughts.filter(thought => thought.destination === selectedDestination)
+      : [];
+  // Filtered by search
+  const filteredThoughts = searchQuery.trim() === ""
+    ? destinationThoughts
+    : destinationThoughts.filter(thought =>
+        thought.content.toLowerCase().includes(searchQuery.trim().toLowerCase())
+      );
 
   // Drag and drop sensors
   const sensors = useSensors(
@@ -124,12 +140,7 @@ export default function Home() {
       });
       
       if (res.ok) {
-        // Update local state
-        setProcessedThoughts((thoughts) =>
-          thoughts.map((t) =>
-            t.id === thought.id ? { ...t, content: editValue } : t
-          )
-        );
+        await refreshProcessedThoughts();
         setEditThoughtId(null);
         setEditValue("");
         setIsUserActive(false);
@@ -154,10 +165,7 @@ export default function Home() {
       });
       
       if (res.ok) {
-        // Update local state
-        setProcessedThoughts((thoughts) =>
-          thoughts.filter((t) => t.id !== thoughtId)
-        );
+        await refreshProcessedThoughts();
       } else {
         console.error("Failed to delete thought");
         alert("Failed to delete thought");
@@ -199,82 +207,124 @@ export default function Home() {
       opacity: isDragging ? 0.5 : 1,
       cursor: "grab",
     };
+    // Format date
+    const dateStr = thought.created_at ? new Date(thought.created_at).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : "";
     return (
       <li
         ref={setNodeRef}
         style={style}
         {...attributes}
         {...listeners}
-        className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex items-center gap-2"
+        className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex flex-col gap-1 group"
       >
-        {editThoughtId === thought.id ? (
-          <input
-            className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
-            value={editValue}
-            autoFocus
-            onChange={(e) => setEditValue(e.target.value)}
-            onBlur={async () => await saveEdit(thought)}
-            onKeyDown={async (e) => {
-              if (e.key === "Enter") await saveEdit(thought);
-              if (e.key === "Escape") {
-                setEditThoughtId(null);
-                setEditValue("");
-                setIsUserActive(false);
-              }
-            }}
-          />
-        ) : (
-          <div
-            className="flex-1 font-medium text-foreground cursor-pointer"
-            onClick={() => startEdit(thought)}
-            title="Click to edit"
-          >
-            {thought.content}
+        <div className="flex flex-row items-start justify-between w-full mb-1">
+          <span className="inline-block mt-1 px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+            {thought.destination}
+          </span>
+          <div className="text-xs text-muted-foreground ml-2 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            {dateStr}
           </div>
-        )}
-        <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
-          Destination: {thought.destination}
         </div>
-        <button
-          className="ml-2 text-red-500 hover:text-red-700 text-lg font-bold px-2 py-0.5 rounded focus:outline-none"
-          title="Delete thought"
-          onClick={async (e) => {
-            e.stopPropagation();
-            await deleteThought(thought.id);
-          }}
-        >
-          ×
-        </button>
+        <div className="flex flex-row items-center gap-2 w-full">
+          {editThoughtId === thought.id ? (
+            <input
+              className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
+              value={editValue}
+              autoFocus
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={async () => await saveEdit(thought)}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter") await saveEdit(thought);
+                if (e.key === "Escape") {
+                  setEditThoughtId(null);
+                  setEditValue("");
+                  setIsUserActive(false);
+                }
+              }}
+            />
+          ) : (
+            <div
+              className="flex-1 font-medium text-foreground cursor-pointer"
+              onClick={() => startEdit(thought)}
+              title="Click to edit"
+            >
+              {thought.content}
+            </div>
+          )}
+          <button
+            className="ml-2 text-red-500 hover:text-red-700 text-lg font-bold px-2 py-0.5 rounded focus:outline-none opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+            title="Delete thought"
+            onClick={async (e) => {
+              e.stopPropagation();
+              await deleteThought(thought.id);
+            }}
+          >
+            ×
+          </button>
+        </div>
       </li>
     );
   }
 
-  async function addNote(e: React.FormEvent) {
-    e.preventDefault();
-    if (input.trim()) {
-      setIsUserActive(true);
-      // POST to backend
-      const res = await fetch("http://localhost:8000/thoughts/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: input.trim() })
-      });
-      if (res.ok) {
-        const newProcessedThought: ProcessedThought = await res.json();
-        // Refresh the processed thoughts to get the latest data
-        await refreshProcessedThoughts();
-        setInput("");
-        inputRef.current?.focus();
-        setIsUserActive(false);
-      } else {
-        // Handle error (optional)
-        alert("Failed to add note");
-        setIsUserActive(false);
+  // Refactor addNote logic so it can be reused
+  const handleAddNote = useCallback(
+    async (content: string) => {
+      if (content.trim()) {
+        setIsUserActive(true);
+        const res = await fetch("http://localhost:8000/thoughts/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: content.trim() })
+        });
+        if (res.ok) {
+          await refreshProcessedThoughts();
+          setInput("");
+          setSpotlightInput("");
+          inputRef.current?.focus();
+          setIsUserActive(false);
+          setShowSpotlight(false);
+        } else {
+          alert("Failed to add note");
+          setIsUserActive(false);
+        }
+      }
+    },
+    [refreshProcessedThoughts]
+  );
+
+  // Keyboard shortcut for Spotlight (Cmd+N)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        setShowSpotlight(true);
+        setTimeout(() => {
+          spotlightInputRef.current?.focus();
+        }, 10);
+      }
+      // Close modal on Escape
+      if (e.key === "Escape" && showSpotlight) {
+        setShowSpotlight(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showSpotlight]);
+
+  // Close modal on outside click
+  useEffect(() => {
+    if (!showSpotlight) return;
+    function handleClick(e: MouseEvent) {
+      const modal = document.getElementById("spotlight-modal");
+      if (modal && !modal.contains(e.target as Node)) {
+        setShowSpotlight(false);
       }
     }
-  }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showSpotlight]);
 
   // Fetch data from backend 
   useEffect(() => {
@@ -320,15 +370,64 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-row bg-background">
+      {/* Spotlight Modal */}
+      {showSpotlight && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" style={{backdropFilter: 'blur(2px)'}}>
+          <div
+            id="spotlight-modal"
+            className="bg-white dark:bg-black/90 rounded-xl shadow-2xl p-6 w-full max-w-md flex flex-col gap-4 border border-border"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-lg font-semibold mb-2 text-foreground">New Note</div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                await handleAddNote(spotlightInput);
+              }}
+              className="flex flex-row gap-2"
+            >
+              <textarea
+                ref={spotlightInputRef as any}
+                className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none min-h-[60px] max-h-40"
+                placeholder="Type your note..."
+                value={spotlightInput}
+                onChange={e => setSpotlightInput(e.target.value)}
+                onKeyDown={async (e) => {
+                  if (e.key === "Escape") {
+                    setShowSpotlight(false);
+                  }
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    await handleAddNote(spotlightInput);
+                  }
+                }}
+                autoFocus
+                rows={3}
+              />
+              <Button type="submit" className="shrink-0">Add</Button>
+            </form>
+            <div className="text-xs text-muted-foreground mt-1">Press <kbd>Esc</kbd> to close</div>
+          </div>
+        </div>
+      )}
       {/* Sidebar */}
       <aside className="w-72 min-h-screen border-r border-border bg-white dark:bg-black/40 flex flex-col p-4 gap-2">
         {/* Destinations Section */}
         <Card className="shadow-none border-none bg-transparent">
           <CardHeader className="p-0 mb-2">
-            <CardTitle className="text-xl font-bold text-foreground">Destinations</CardTitle>
+            <CardTitle className="text-xl font-bold text-foreground">Lists</CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <ul className="flex flex-col gap-1">
+              <li>
+                <Button
+                  variant={selectedDestination === "__all__" ? "default" : "ghost"}
+                  className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
+                  onClick={() => setSelectedDestination("__all__")}
+                >
+                  All Notes
+                </Button>
+              </li>
               {destinations.length === 0 && (
                 <li className="text-muted-foreground select-none">No destinations</li>
               )}
@@ -351,46 +450,52 @@ export default function Home() {
       </aside>
       {/* Main content */}
       <main className="flex-1 flex flex-col items-center justify-start px-4 py-12 gap-8">
-        <Separator className="my-8 w-full max-w-xl" />
-        {/* Processed Thoughts for selected destination */}
-        <Card className="w-full max-w-xl">
-          <CardHeader>
-            <CardTitle className="text-2xl font-semibold mb-4 text-foreground">
-              {selectedDestination 
-                ? `Thoughts for "${selectedDestination}"` 
-                : 'Processed Thoughts'
-              }
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!selectedDestination && (
-              <div className="text-muted-foreground">Select a destination to view its thoughts.</div>
-            )}
-            {selectedDestination && destinationThoughts.length === 0 && (
-              <div className="text-muted-foreground">No thoughts found for this destination.</div>
-            )}
-            {selectedDestination && destinationThoughts.length > 0 && (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
+        {/* Search Bar */}
+        <div className="w-full max-w-xl flex flex-row items-center gap-2 mb-2">
+          <input
+            type="text"
+            className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            placeholder="Search notes..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
+        {/* Processed Thoughts for selected destination (no Card) */}
+        <div className="w-full max-w-xl flex flex-col gap-4">
+          <div className="text-2xl font-semibold mb-4 text-foreground">
+            {selectedDestination === "__all__"
+              ? 'All Notes'
+              : selectedDestination
+                ? `${selectedDestination}`
+                : 'Notes'}
+          </div>
+          {selectedDestination === null && (
+            <div className="text-muted-foreground">Select a list to view its notes.</div>
+          )}
+          {selectedDestination !== null && filteredThoughts.length === 0 && (
+            <div className="text-muted-foreground">No notes found for this list.</div>
+          )}
+          {selectedDestination !== null && filteredThoughts.length > 0 && (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={filteredThoughts.map((t) => t.id)}
+                strategy={verticalListSortingStrategy}
               >
-                <SortableContext
-                  items={destinationThoughts.map((t) => t.id)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <ul className="flex flex-col gap-2">
-                    {destinationThoughts.map((thought) => (
-                      <SortableThoughtItem key={thought.id} thought={thought} />
-                    ))}
-                  </ul>
-                </SortableContext>
-              </DndContext>
-            )}
-          </CardContent>
-        </Card>
+                <ul className="flex flex-col gap-2">
+                  {filteredThoughts.map((thought) => (
+                    <SortableThoughtItem key={thought.id} thought={thought} />
+                  ))}
+                </ul>
+              </SortableContext>
+            </DndContext>
+          )}
+        </div>
         <footer className="mt-auto text-xs text-muted-foreground py-4 text-center opacity-70 w-full">
-          Built with Next.js. Your notes are private and stored only in your browser.
+          Noether: Think it. Capture it. Organize it.
         </footer>
       </main>
     </div>
