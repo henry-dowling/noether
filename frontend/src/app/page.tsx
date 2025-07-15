@@ -13,14 +13,9 @@ interface ProcessedThought {
 export default function Home() {
   const [notes, setNotes] = useState<ProcessedThought[]>([]);
   const [input, setInput] = useState("");
-  const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Fetch allowed destinations from backend
-    fetch("http://localhost:8000/destinations/")
-      .then(res => res.json())
-      .then(data => setDestinations(data));
     // Fetch processed thoughts from backend on mount
     fetch("http://localhost:8000/processed_thoughts/")
       .then(res => res.json())
@@ -47,8 +42,6 @@ export default function Home() {
         body: JSON.stringify({ content: input.trim() })
       });
       if (res.ok) {
-        // The backend returns a ProcessedThought
-        const newProcessedThought: ProcessedThought = await res.json();
         // Refresh the processed thoughts to get the latest data
         fetch("http://localhost:8000/processed_thoughts/")
           .then(res => res.json())
@@ -126,7 +119,7 @@ export default function Home() {
         ))}
       </ul>
       <footer className="mt-auto text-xs text-muted-foreground py-4 text-center opacity-70">
-        Built with Next.js. Your notes are private and stored only in your browser.
+        Noether AI: Your funnel for all your thoughts.
       </footer>
     </div>
   );

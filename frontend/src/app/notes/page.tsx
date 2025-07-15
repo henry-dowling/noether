@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
-import { Separator } from "../../components/ui/separator";
-import Link from "next/link";
 import {
   DndContext,
   closestCenter,
@@ -12,6 +10,7 @@ import {
   useSensor,
   useSensors,
   DragEndEvent,
+  useDroppable,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -30,29 +29,12 @@ interface ProcessedThought {
   order: number;
 }
 
-interface Document {
-  id: number;
-  label: string;
-  thoughts: ProcessedThought[];
-}
-
-// Define the Thought type to match backend
-interface Thought {
-  id: number;
-  content: string;
-  destination: string; // Now dynamic, fetched from backend
-}
-
 export default function Home() {
-  const [notes, setNotes] = useState<Thought[]>([]);
-  const [input, setInput] = useState("");
   const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   
   // Processed thoughts state (from backend)
   const [processedThoughts, setProcessedThoughts] = useState<ProcessedThought[]>([]);
-  const [loadingThoughts, setLoadingThoughts] = useState(false);
-  const [errorThoughts, setErrorThoughts] = useState<string | null>(null);
   const [editThoughtId, setEditThoughtId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
 
@@ -63,7 +45,7 @@ export default function Home() {
   // Spotlight modal state
   const [showSpotlight, setShowSpotlight] = useState(false);
   const [spotlightInput, setSpotlightInput] = useState("");
-  const spotlightInputRef = useRef<HTMLInputElement>(null);
+  const spotlightInputRef = useRef<HTMLTextAreaElement>(null);
   // Search bar state
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -217,7 +199,7 @@ export default function Home() {
   };
 
   // Function to refresh processed thoughts from backend
-  const refreshProcessedThoughts = async () => {
+  const refreshProcessedThoughts = useCallback(async () => {
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
       if (!API_URL) {
@@ -233,7 +215,7 @@ export default function Home() {
     } catch (err) {
       console.error("Error refreshing processed thoughts:", err);
     }
-  };
+  }, []);
 
   // Add note to specific destination
   const handleAddNoteToDestination = async (content: string) => {
@@ -336,7 +318,7 @@ export default function Home() {
 
   // Highlight destination on drag-over
   function DestinationDropTarget({ destination, children }: { destination: string, children: React.ReactNode }) {
-    const { setNodeRef, isOver } = require('@dnd-kit/core').useDroppable({ id: destination });
+    const { setNodeRef, isOver } = useDroppable({ id: destination });
     return (
       <div
         ref={setNodeRef}
@@ -371,7 +353,6 @@ export default function Home() {
         });
         if (res.ok) {
           await refreshProcessedThoughts();
-          setInput("");
           setSpotlightInput("");
           inputRef.current?.focus();
           setIsUserActive(false);
@@ -429,36 +410,9 @@ export default function Home() {
       .then(data => setDestinations(data))
       .catch(err => console.error("Failed to fetch destinations:", err));
     
-    // Fetch existing notes from backend on mount
-    const API_URL_NOTES = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL_NOTES) {
-      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
-    }
-    fetch(`${API_URL_NOTES}/thoughts/`)
-      .then(res => res.json())
-      .then(data => setNotes(data))
-      .catch(err => console.error("Failed to fetch thoughts:", err));
-
-    setLoadingThoughts(true);
-    setErrorThoughts(null);
-
     // Fetch processed thoughts from backend
-    const API_URL_PROCESSED = process.env.NEXT_PUBLIC_API_URL;
-    if (!API_URL_PROCESSED) {
-      throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
-    }
-    fetch(`${API_URL_PROCESSED}/processed_thoughts/`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch processed thoughts");
-        return res.json();
-      })
-      .then((data) => {
-        setProcessedThoughts(data);
-      })
-      .catch((err) => setErrorThoughts(err.message))
-      .finally(() => setLoadingThoughts(false));
-    
-  }, []);
+    refreshProcessedThoughts();
+  }, [refreshProcessedThoughts]);
 
   // Polling effect to refresh processed thoughts periodically
   useEffect(() => {
@@ -495,7 +449,7 @@ export default function Home() {
                 className="flex flex-row gap-2"
               >
                 <textarea
-                  ref={spotlightInputRef as any}
+                  ref={spotlightInputRef}
                   className="flex-1 px-3 py-2 rounded border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none min-h-[60px] max-h-40"
                   placeholder="Type your note..."
                   value={spotlightInput}
