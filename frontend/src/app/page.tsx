@@ -284,7 +284,7 @@ export default function Home() {
   };
 
   // Sortable Thought Item
-  function SortableThoughtItem({ thought }: { thought: ProcessedThought }) {
+  function SortableThoughtItem({ thought, editThoughtId }: { thought: ProcessedThought, editThoughtId: number | null }) {
     const {
       attributes,
       listeners,
@@ -870,14 +870,14 @@ export default function Home() {
                 >
                   <ul className="flex flex-col gap-2">
                     {filteredThoughts.map((thought) => (
-                      <SortableThoughtItem key={thought.id} thought={thought} />
+                      <SortableThoughtItem key={thought.id} thought={thought} editThoughtId={editThoughtId} />
                     ))}
                   </ul>
                 </SortableContext>
               ) : (
                 <ul className="flex flex-col gap-2">
                   {filteredThoughts.map((thought) => (
-                    <SortableThoughtItem key={thought.id} thought={thought} />
+                    <SortableThoughtItem key={thought.id} thought={thought} editThoughtId={editThoughtId} />
                   ))}
                 </ul>
               )
