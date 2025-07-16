@@ -36,7 +36,7 @@ export default function Home() {
   // Processed thoughts state (from backend)
   const [processedThoughts, setProcessedThoughts] = useState<ProcessedThought[]>([]);
   const [editThoughtId, setEditThoughtId] = useState<number | null>(null);
-  const [editValue, setEditValue] = useState("");
+  // REMOVE: const [editValue, setEditValue] = useState("");
 
   // Destination view state
   const [selectedDestination, setSelectedDestination] = useState<string | null>("__all__");
@@ -48,6 +48,9 @@ export default function Home() {
   const spotlightInputRef = useRef<HTMLTextAreaElement>(null);
   // Search bar state
   const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null); // <-- Add this line
+  // Highlight destination after adding note via Spotlight
+  const [highlightedDestination, setHighlightedDestination] = useState<string | null>(null);
 
   // Add state for new note input at the bottom
   const [newNoteInput, setNewNoteInput] = useState("");
@@ -60,6 +63,14 @@ export default function Home() {
   const [showSidebar, setShowSidebar] = useState(false); // For mobile sidebar
   // Mobile move modal state
   const [moveModal, setMoveModal] = useState<{ open: boolean, thought: ProcessedThought | null }>({ open: false, thought: null });
+
+  // Focus new note input when destination changes or on load
+  useEffect(() => {
+    // Only focus if not on mobile add note modal
+    if (!showAddNoteModal && newNoteInputRef.current) {
+      newNoteInputRef.current.focus();
+    }
+  }, [selectedDestination, showAddNoteModal]);
 
   // Get thoughts for selected destination, sorted by chosen mode
   const destinationThoughts = selectedDestination === "__all__"
@@ -148,11 +159,10 @@ export default function Home() {
   // Handle edit
   const startEdit = (thought: ProcessedThought) => {
     setEditThoughtId(thought.id);
-    setEditValue(thought.content);
     setIsUserActive(true);
   };
-  
-  const saveEdit = async (thought: ProcessedThought) => {
+  // Update saveEdit to accept value
+  const saveEdit = async (thought: ProcessedThought, newValue: string) => {
     try {
       // Update thought in backend
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -166,14 +176,13 @@ export default function Home() {
         },
         body: JSON.stringify({
           ...thought,
-          content: editValue
+          content: newValue
         })
       });
       
       if (res.ok) {
         await refreshProcessedThoughts();
         setEditThoughtId(null);
-        setEditValue("");
         setIsUserActive(false);
       } else {
         console.error("Failed to update thought");
@@ -310,12 +319,32 @@ export default function Home() {
     }) : "";
     // Mobile long-press handler for move icon
     const longPressTimeout = useRef<NodeJS.Timeout | null>(null);
+
+    // Local state for editing value
+    const [localEditValue, setLocalEditValue] = useState(thought.content);
+    // Keep localEditValue in sync if thought.content changes (e.g. after save)
+    useEffect(() => {
+      if (editThoughtId === thought.id) {
+        setLocalEditValue(thought.content);
+      }
+    }, [editThoughtId, thought.content, thought.id]);
+
+    // Save handler using localEditValue
+    const handleSaveEdit = async () => {
+      if (localEditValue.trim() !== thought.content) {
+        await saveEdit(thought, localEditValue);
+      } else {
+        setEditThoughtId(null);
+        setIsUserActive(false);
+      }
+    };
+
     return (
       <li
         ref={setNodeRef}
         style={style}
         {...attributes}
-        className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 shadow-sm flex flex-col gap-1 group relative overflow-hidden"
+        className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 flex flex-col gap-1 group relative overflow-hidden hover:shadow-md transition-shadow"
         onTouchStart={(e) => {
           if (window.innerWidth >= 768) return;
           // Only allow long-press if not on drag handle or delete button
@@ -330,7 +359,7 @@ export default function Home() {
         onTouchEnd={() => {
           if (longPressTimeout.current) clearTimeout(longPressTimeout.current);
         }}
-        {...(!isMobile ? listeners : {})}
+        {...((!isMobile && editThoughtId !== thought.id) ? listeners : {})}
       >
         <div className="flex flex-row items-start justify-between w-full">
           <span className="hidden md:inline mt-1 mb-1 px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
@@ -350,22 +379,21 @@ export default function Home() {
           {editThoughtId === thought.id ? (
             <input
               className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
-              value={editValue}
+              value={localEditValue}
               autoFocus
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={async () => await saveEdit(thought)}
+              onChange={(e) => setLocalEditValue(e.target.value)}
+              onBlur={handleSaveEdit}
               onKeyDown={async (e) => {
-                if (e.key === "Enter") await saveEdit(thought);
+                if (e.key === "Enter") await handleSaveEdit();
                 if (e.key === "Escape") {
                   setEditThoughtId(null);
-                  setEditValue("");
                   setIsUserActive(false);
                 }
               }}
             />
           ) : (
             <div
-              className="flex-1 font-medium text-foreground cursor-pointer"
+              className="flex-1 font-medium text-foreground cursor-text"
               onClick={() => startEdit(thought)}
               title="Click to edit"
             >
@@ -447,11 +475,18 @@ export default function Home() {
           body: JSON.stringify({ content: content.trim() })
         });
         if (res.ok) {
+          const data = await res.json();
           await refreshProcessedThoughts();
           setSpotlightInput("");
           inputRef.current?.focus();
           setIsUserActive(false);
           setShowSpotlight(false);
+          // Highlight the destination where the note was saved
+          if (data && data.destination) {
+            setHighlightedDestination(data.destination);
+          } else {
+            setHighlightedDestination("__all__");
+          }
         } else {
           alert("Failed to add note");
           setIsUserActive(false);
@@ -461,15 +496,29 @@ export default function Home() {
     [refreshProcessedThoughts]
   );
 
-  // Keyboard shortcut for Spotlight (Cmd+N)
+  // Remove highlight after a short delay
+  useEffect(() => {
+    if (highlightedDestination) {
+      const timeout = setTimeout(() => setHighlightedDestination(null), 1000);
+      return () => clearTimeout(timeout);
+    }
+  }, [highlightedDestination]);
+
+  // Keyboard shortcut for Spotlight (Cmd+K) and Search (Cmd+Shift+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") {
+      // Command/Ctrl+K (without Shift): New Note (Spotlight)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setShowSpotlight(true);
         setTimeout(() => {
           spotlightInputRef.current?.focus();
         }, 10);
+      }
+      // Command/Ctrl+Shift+K: Focus search bar
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
       }
       // Close modal on Escape
       if (e.key === "Escape" && showSpotlight) {
@@ -535,7 +584,6 @@ export default function Home() {
               className="bg-white dark:bg-black/90 rounded-xl shadow-2xl p-6 w-full max-w-md flex flex-col gap-4 border border-border"
               onClick={e => e.stopPropagation()}
             >
-              <div className="text-lg font-semibold mb-2 text-foreground">New Note</div>
               <form
                 onSubmit={async (e) => {
                   e.preventDefault();
@@ -561,9 +609,7 @@ export default function Home() {
                   autoFocus
                   rows={3}
                 />
-                <Button type="submit" className="shrink-0">Add</Button>
               </form>
-              <div className="text-xs text-muted-foreground mt-1">Press <kbd>Esc</kbd> to close</div>
             </div>
           </div>
         )}
@@ -599,7 +645,7 @@ export default function Home() {
                   <DestinationDropTarget destination="__all__">
                     <Button
                       variant={selectedDestination === "__all__" ? "default" : "ghost"}
-                      className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
+                      className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""} ${highlightedDestination === "__all__" ? "ring-2 ring-gray-300 ring-offset-2 animate-pulse" : ""} cursor-pointer`}
                       onClick={() => setSelectedDestination("__all__")}
                     >
                       All Notes
@@ -614,7 +660,7 @@ export default function Home() {
                     <DestinationDropTarget destination={destination}>
                       <Button
                         variant={selectedDestination === destination ? "default" : "ghost"}
-                        className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
+                        className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""} ${highlightedDestination === destination ? "ring-2 ring-gray-300 ring-offset-2 animate-pulse" : ""} cursor-pointer`}
                         onClick={() => {
                           setSelectedDestination(destination);
                         }}
@@ -645,7 +691,7 @@ export default function Home() {
                       <DestinationDropTarget destination="__all__">
                         <Button
                           variant={selectedDestination === "__all__" ? "default" : "ghost"}
-                          className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""}`}
+                          className={`w-full justify-start text-sm ${selectedDestination === "__all__" ? "bg-primary text-background" : ""} cursor-pointer`}
                           onClick={() => {
                             setSelectedDestination("__all__");
                             if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -665,7 +711,7 @@ export default function Home() {
                         <DestinationDropTarget destination={destination}>
                           <Button
                             variant={selectedDestination === destination ? "default" : "ghost"}
-                            className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""}`}
+                            className={`w-full justify-start text-sm ${selectedDestination === destination ? "bg-primary text-background" : ""} cursor-pointer`}
                             onClick={() => {
                               setSelectedDestination(destination);
                               if (typeof window !== 'undefined' && window.innerWidth < 768) {
@@ -694,6 +740,7 @@ export default function Home() {
               placeholder="Find your notes..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
+              ref={searchInputRef} // <-- Add this prop
             />
           </div>
           {/* Processed Thoughts for selected destination (no Card) */}
@@ -708,7 +755,7 @@ export default function Home() {
               </span>
               {/* Toggle sort mode button (right side, small, icon) */}
               <button
-                className="ml-2 p-1.5 rounded border border-border text-muted-foreground bg-background hover:bg-primary/20 hover:text-primary hover:border-primary transition-colors transition-shadow duration-150 flex items-center justify-center text-base shadow-sm group"
+                className="ml-2 p-1.5 rounded border border-border text-muted-foreground bg-background hover:bg-primary/20 hover:text-primary hover:border-primary transition-colors transition-shadow duration-150 flex items-center justify-center text-base group cursor-pointer"
                 style={{ fontSize: '1.1rem' }}
                 onClick={() => setSortMode(sortMode === 'manual' ? 'chronological' : 'manual')}
                 title={sortMode === 'manual' ? 'Switch to reverse chronological order' : 'Switch to manual order'}
@@ -768,7 +815,7 @@ export default function Home() {
                 }
               }}
             >
-              <div className="bg-white dark:bg-black/30 border border-border rounded px-3 py-1 md:px-4 md:py-3 shadow-sm flex flex-col gap-1 group">
+              <div className="bg-white dark:bg-black/30 border border-border rounded px-3 py-1 md:px-4 md:py-3 flex flex-col gap-1 group">
                 <textarea
                   ref={newNoteInputRef}
                   className="flex-1 bg-transparent border-none focus:outline-none text-foreground font-medium text-sm md:text-base resize-none min-h-[28px] max-h-28 md:min-h-[32px] md:max-h-32 placeholder:text-muted-foreground pt-2 md:pt-0"
