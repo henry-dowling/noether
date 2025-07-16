@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException, Body, Depends
+from fastapi import FastAPI, HTTPException, Body, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from enum import Enum
 import os
+import httpx
 from dotenv import load_dotenv
 from datetime import datetime
 from db import Base, engine, SessionLocal
@@ -13,6 +14,11 @@ from openai import OpenAI
 load_dotenv()
 
 app = FastAPI()
+
+# Telegram tokens
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # set this in your .env or env vars
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/"
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -212,3 +218,30 @@ def categorize_thought_with_openai(content: str) -> DestinationEnum:
     except Exception as e:
         print(f"OpenAI error: {e}")
         return DestinationEnum.reading_list  # Default fallback
+
+
+async def send_message(chat_id: int, text: str):
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            TELEGRAM_API_URL + "sendMessage",
+            json={"chat_id": chat_id, "text": text}
+        )
+
+
+@app.post("/webhook")
+async def telegram_webhook(request: Request, db: SessionLocal = Depends(get_db)):
+    print("telegram recieved")
+    data = await request.json()
+    message = data.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    text = message.get("text")
+
+    if not chat_id or not text:
+        return {"ok": True}
+
+    # Create a new Thought from the Telegram message
+    thought_data = ThoughtCreate(content=text)
+    created = create_thought(thought=thought_data, db=db)
+
+    await send_message(chat_id, f"💡 Added to your {created.destination}: {created.content}")
+    return {"ok": True}
