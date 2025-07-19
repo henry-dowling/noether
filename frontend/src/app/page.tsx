@@ -29,12 +29,27 @@ interface ProcessedThought {
   order: number;
 }
 
+// Types for pending thoughts (optimistic updates)
+interface PendingThought {
+  tempId: string;
+  content: string;
+  destination?: string; // May not know destination yet if letting backend categorize
+  created_at: string;
+  order: number;
+  isPending: true;
+}
+
+// Union type for display
+type DisplayThought = ProcessedThought | PendingThought;
+
 export default function Home() {
   const [destinations, setDestinations] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   
   // Processed thoughts state (from backend)
   const [processedThoughts, setProcessedThoughts] = useState<ProcessedThought[]>([]);
+  // Pending thoughts state (optimistic updates)
+  const [pendingThoughts, setPendingThoughts] = useState<PendingThought[]>([]);
   const [editThoughtId, setEditThoughtId] = useState<number | null>(null);
   // REMOVE: const [editValue, setEditValue] = useState("");
 
@@ -72,19 +87,53 @@ export default function Home() {
     }
   }, [selectedDestination, showAddNoteModal]);
 
-  // Get thoughts for selected destination, sorted by chosen mode
-  const destinationThoughts = selectedDestination === "__all__"
-    ? processedThoughts
-    : selectedDestination
-      ? processedThoughts.filter(thought => thought.destination === selectedDestination)
-      : [];
-  let sortedDestinationThoughts: ProcessedThought[];
+  // Helper function to get unique ID for any thought type
+  const getThoughtId = (thought: DisplayThought): string | number => {
+    return 'isPending' in thought ? thought.tempId : thought.id;
+  };
+
+  // Helper function to check if thought matches destination filter
+  const matchesDestination = (thought: DisplayThought, destination: string | null): boolean => {
+    if (destination === "__all__") return true;
+    if (!destination) return false;
+    
+    // For pending thoughts without destination, show in "All Notes" view only
+    if ('isPending' in thought && !thought.destination) {
+      return destination === "__all__";
+    }
+    
+    return thought.destination === destination;
+  };
+
+  // Merge processed and pending thoughts for selected destination
+  const allThoughts: DisplayThought[] = [
+    ...processedThoughts,
+    ...pendingThoughts
+  ];
+  
+  const destinationThoughts = selectedDestination === null
+    ? []
+    : allThoughts.filter(thought => matchesDestination(thought, selectedDestination));
+    
+  let sortedDestinationThoughts: DisplayThought[];
   if (sortMode === 'manual') {
-    // Manual order (drag-and-drop)
-    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => b.order - a.order);
+    // Manual order (drag-and-drop) - pending thoughts appear at top
+    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => {
+      // Pending thoughts always appear first
+      if ('isPending' in a && !('isPending' in b)) return -1;
+      if (!('isPending' in a) && 'isPending' in b) return 1;
+      // Both same type, sort by order
+      return b.order - a.order;
+    });
   } else {
-    // Reverse chronological
-    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // Reverse chronological - pending thoughts appear at top
+    sortedDestinationThoughts = [...destinationThoughts].sort((a, b) => {
+      // Pending thoughts always appear first
+      if ('isPending' in a && !('isPending' in b)) return -1;
+      if (!('isPending' in a) && 'isPending' in b) return 1;
+      // Both same type, sort by date
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
   }
   // Filtered by search
   const filteredThoughts = searchQuery.trim() === ""
@@ -109,14 +158,14 @@ export default function Home() {
 
     // If dropped on a destination (sidebar)
     if (over.id && typeof over.id === 'string' && destinations.includes(over.id)) {
-      const thought = processedThoughts.find(t => t.id === active.id);
-      if (!thought) return;
-      // Update backend with new destination
+      const thought = allThoughts.find(t => getThoughtId(t) === active.id);
+      if (!thought || 'isPending' in thought) return; // Can't move pending thoughts
+      // Update backend with new destination  
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
       if (!API_URL) {
         throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
       }
-      await fetch(`${API_URL}/processed_thoughts/${thought.id}`, {
+      await fetch(`${API_URL}/processed_thoughts/${(thought as ProcessedThought).id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...thought, destination: over.id })
@@ -125,12 +174,13 @@ export default function Home() {
       return;
     }
 
-    // Reordering within a destination
-    const oldIndex = sortedDestinationThoughts.findIndex((t) => t.id === active.id);
-    const newIndex = sortedDestinationThoughts.findIndex((t) => t.id === over.id);
+    // Reordering within a destination (only for processed thoughts, not pending)
+    const processedOnlyThoughts = sortedDestinationThoughts.filter(t => !('isPending' in t)) as ProcessedThought[];
+    const oldIndex = processedOnlyThoughts.findIndex((t) => t.id === active.id);
+    const newIndex = processedOnlyThoughts.findIndex((t) => t.id === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
 
-    const newThoughts = arrayMove(sortedDestinationThoughts, oldIndex, newIndex);
+    const newThoughts = arrayMove(processedOnlyThoughts, oldIndex, newIndex);
 
     // Assign highest order to top, descending
     const maxOrder = newThoughts.length > 0 ? Math.max(...newThoughts.map(t => t.order)) : 0;
@@ -239,28 +289,67 @@ export default function Home() {
     }
   }, []);
 
+  // Helper functions for optimistic updates
+  const addPendingThought = (content: string, destination?: string) => {
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const maxOrder = Math.max(...processedThoughts.map(t => t.order), 0);
+    
+    const pendingThought: PendingThought = {
+      tempId,
+      content,
+      destination,
+      created_at: new Date().toISOString(),
+      order: maxOrder + 1,
+      isPending: true
+    };
+    
+    setPendingThoughts(prev => [pendingThought, ...prev]);
+    return tempId;
+  };
+
+  const removePendingThought = (tempId: string) => {
+    setPendingThoughts(prev => prev.filter(t => t.tempId !== tempId));
+  };
+
   // Add note to specific destination
   const handleAddNoteToDestination = async (content: string) => {
     if (!selectedDestination || selectedDestination === "__all__") return;
     if (content.trim()) {
+      // Immediately add pending thought with known destination
+      const tempId = addPendingThought(content.trim(), selectedDestination);
+      
       setIsUserActive(true);
       const API_URL = process.env.NEXT_PUBLIC_API_URL;
       if (!API_URL) {
         throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
       }
-      const res = await fetch(`${API_URL}/thoughts/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: content.trim(), destination: selectedDestination })
-      });
-      if (res.ok) {
-        await refreshProcessedThoughts();
-        setNewNoteInput("");
-        newNoteInputRef.current?.focus();
-        setIsUserActive(false);
-      } else {
+      
+      try {
+        const res = await fetch(`${API_URL}/thoughts/`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content: content.trim(), destination: selectedDestination })
+        });
+        
+        if (res.ok) {
+          // Remove pending thought and refresh with real data
+          removePendingThought(tempId);
+          await refreshProcessedThoughts();
+          setNewNoteInput("");
+          newNoteInputRef.current?.focus();
+          setIsUserActive(false);
+        } else {
+          // Remove pending thought on failure
+          removePendingThought(tempId);
+          alert("Failed to add note");
+          setIsUserActive(false);
+        }
+      } catch (err) {
+        // Remove pending thought on error
+        removePendingThought(tempId);
+        console.error("Error adding note:", err);
         alert("Failed to add note");
         setIsUserActive(false);
       }
@@ -284,7 +373,10 @@ export default function Home() {
   };
 
   // Sortable Thought Item
-  function SortableThoughtItem({ thought, editThoughtId }: { thought: ProcessedThought, editThoughtId: number | null }) {
+  function SortableThoughtItem({ thought, editThoughtId }: { thought: DisplayThought, editThoughtId: number | null }) {
+    const isPending = 'isPending' in thought;
+    const thoughtId = getThoughtId(thought);
+    
     const {
       attributes,
       listeners,
@@ -293,7 +385,10 @@ export default function Home() {
       transform,
       transition,
       isDragging,
-    } = useSortable({ id: thought.id });
+    } = useSortable({ 
+      id: thoughtId,
+      disabled: isPending // Disable dragging for pending thoughts
+    });
     const style = {
       transform: CSS.Transform.toString(transform),
       transition,
@@ -324,15 +419,16 @@ export default function Home() {
     const [localEditValue, setLocalEditValue] = useState(thought.content);
     // Keep localEditValue in sync if thought.content changes (e.g. after save)
     useEffect(() => {
-      if (editThoughtId === thought.id) {
+      if (!isPending && editThoughtId === (thought as ProcessedThought).id) {
         setLocalEditValue(thought.content);
       }
-    }, [editThoughtId, thought.content, thought.id]);
+    }, [editThoughtId, thought.content, thoughtId, isPending]);
 
     // Save handler using localEditValue
     const handleSaveEdit = async () => {
+      if (isPending) return; // Can't edit pending thoughts
       if (localEditValue.trim() !== thought.content) {
-        await saveEdit(thought, localEditValue);
+        await saveEdit(thought as ProcessedThought, localEditValue);
       } else {
         setEditThoughtId(null);
         setIsUserActive(false);
@@ -346,24 +442,24 @@ export default function Home() {
         {...attributes}
         className="bg-white dark:bg-black/30 border border-border rounded px-4 py-3 flex flex-col gap-1 group relative overflow-hidden hover:shadow-md transition-shadow"
         onTouchStart={(e) => {
-          if (window.innerWidth >= 768) return;
+          if (window.innerWidth >= 768 || isPending) return; // Don't allow touch actions on pending thoughts
           // Only allow long-press if not on drag handle or delete button
           const target = e.target as HTMLElement;
           if (target.closest('.drag-handle') || target.closest('.delete-button')) return;
           // Long press for move modal
           if (longPressTimeout.current) clearTimeout(longPressTimeout.current);
           longPressTimeout.current = setTimeout(() => {
-            setMoveModal({ open: true, thought });
+            setMoveModal({ open: true, thought: thought as ProcessedThought });
           }, 500);
         }}
         onTouchEnd={() => {
           if (longPressTimeout.current) clearTimeout(longPressTimeout.current);
         }}
-        {...((!isMobile && editThoughtId !== thought.id) ? listeners : {})}
+        {...((!isMobile && !isPending && editThoughtId !== thoughtId) ? listeners : {})}
       >
         <div className="flex flex-row items-start justify-between w-full">
           <span className="hidden md:inline mt-1 mb-1 px-2 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
-            {thought.destination}
+            {isPending && !thought.destination ? "Categorizing..." : thought.destination}
           </span>
           {/* Timestamp: only visible on desktop on hover/focus */}
           <div
@@ -376,7 +472,7 @@ export default function Home() {
           </div>
         </div>
         <div className="flex flex-row items-center gap-2 w-full">
-          {editThoughtId === thought.id ? (
+          {!isPending && editThoughtId === (thought as ProcessedThought).id ? (
             <input
               className="flex-1 bg-transparent border-b border-primary focus:outline-none text-foreground"
               value={localEditValue}
@@ -393,29 +489,29 @@ export default function Home() {
             />
           ) : (
             <div
-              className="flex-1 font-medium text-foreground cursor-text"
-              onClick={() => startEdit(thought)}
-              title="Click to edit"
+              className={`flex-1 font-medium text-foreground ${isPending ? 'opacity-70' : 'cursor-text'}`}
+              onClick={() => !isPending && startEdit(thought as ProcessedThought)}
+              title={isPending ? "Processing..." : "Click to edit"}
             >
               {thought.content}
             </div>
           )}
-          {/* Delete button: only render on desktop (md and up), only visible on hover/focus */}
-          {!isMobile && (
+          {/* Delete button: only render on desktop (md and up), only visible on hover/focus, not for pending thoughts */}
+          {!isMobile && !isPending && (
             <button
               className={
                 `ml-2 text-gray-400 hover:text-gray-600 text-lg font-bold px-2 py-0.5 rounded focus:outline-none transition-opacity duration-150 delete-button opacity-0 group-hover:opacity-100 group-focus-within:opacity-100`
               }
               title="Delete thought"
               onClick={async () => {
-                await deleteThought(thought.id);
+                await deleteThought((thought as ProcessedThought).id);
               }}
             >
               ×
             </button>
           )}
-          {/* Drag handle: only visible on mobile and manual sort mode, right side, vertically centered */}
-          {isMobile && sortMode === 'manual' && (
+          {/* Drag handle: only visible on mobile and manual sort mode, right side, vertically centered, not for pending thoughts */}
+          {isMobile && sortMode === 'manual' && !isPending && (
             <span
               className="drag-handle flex items-center ml-2 text-gray-300 select-none md:hidden cursor-grab"
               ref={setActivatorNodeRef}
@@ -460,6 +556,9 @@ export default function Home() {
   const handleAddNote = useCallback(
     async (content: string) => {
       if (content.trim()) {
+        // Immediately add pending thought for optimistic update
+        const tempId = addPendingThought(content.trim());
+        
         setIsUserActive(true);
 
         const API_URL = process.env.NEXT_PUBLIC_API_URL;
@@ -467,27 +566,40 @@ export default function Home() {
           throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
         }
 
-        const res = await fetch(`${API_URL}/thoughts/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ content: content.trim() })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          await refreshProcessedThoughts();
-          setSpotlightInput("");
-          inputRef.current?.focus();
-          setIsUserActive(false);
-          setShowSpotlight(false);
-          // Highlight the destination where the note was saved
-          if (data && data.destination) {
-            setHighlightedDestination(data.destination);
+        try {
+          const res = await fetch(`${API_URL}/thoughts/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ content: content.trim() })
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            // Remove pending thought and refresh with real data
+            removePendingThought(tempId);
+            await refreshProcessedThoughts();
+            setSpotlightInput("");
+            inputRef.current?.focus();
+            setIsUserActive(false);
+            setShowSpotlight(false);
+            // Highlight the destination where the note was saved
+            if (data && data.destination) {
+              setHighlightedDestination(data.destination);
+            } else {
+              setHighlightedDestination("__all__");
+            }
           } else {
-            setHighlightedDestination("__all__");
+            // Remove pending thought on failure
+            removePendingThought(tempId);
+            alert("Failed to add note");
+            setIsUserActive(false);
           }
-        } else {
+        } catch (err) {
+          // Remove pending thought on error
+          removePendingThought(tempId);
+          console.error("Error adding note:", err);
           alert("Failed to add note");
           setIsUserActive(false);
         }
@@ -790,22 +902,39 @@ export default function Home() {
                 if (selectedDestination === "__all__") {
                   // All Notes: let backend categorize
                   if (newNoteInput.trim()) {
+                    // Immediately add pending thought (no destination yet)
+                    const tempId = addPendingThought(newNoteInput.trim());
+                    
                     setIsUserActive(true);
                     const API_URL = process.env.NEXT_PUBLIC_API_URL;
                     if (!API_URL) {
                       throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
                     }
-                    const res = await fetch(`${API_URL}/thoughts/`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ content: newNoteInput.trim() })
-                    });
-                    if (res.ok) {
-                      await refreshProcessedThoughts();
-                      setNewNoteInput("");
-                      newNoteInputRef.current?.focus();
-                      setIsUserActive(false);
-                    } else {
+                    
+                    try {
+                      const res = await fetch(`${API_URL}/thoughts/`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ content: newNoteInput.trim() })
+                      });
+                      
+                      if (res.ok) {
+                        // Remove pending thought and refresh with real data
+                        removePendingThought(tempId);
+                        await refreshProcessedThoughts();
+                        setNewNoteInput("");
+                        newNoteInputRef.current?.focus();
+                        setIsUserActive(false);
+                      } else {
+                        // Remove pending thought on failure
+                        removePendingThought(tempId);
+                        alert("Failed to add note");
+                        setIsUserActive(false);
+                      }
+                    } catch (err) {
+                      // Remove pending thought on error
+                      removePendingThought(tempId);
+                      console.error("Error adding note:", err);
                       alert("Failed to add note");
                       setIsUserActive(false);
                     }
@@ -827,22 +956,39 @@ export default function Home() {
                       e.preventDefault();
                       if (selectedDestination === "__all__") {
                         if (newNoteInput.trim()) {
+                          // Immediately add pending thought (no destination yet)
+                          const tempId = addPendingThought(newNoteInput.trim());
+                          
                           setIsUserActive(true);
                           const API_URL = process.env.NEXT_PUBLIC_API_URL;
                           if (!API_URL) {
                             throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
                           }
-                          const res = await fetch(`${API_URL}/thoughts/`, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ content: newNoteInput.trim() })
-                          });
-                          if (res.ok) {
-                            await refreshProcessedThoughts();
-                            setNewNoteInput("");
-                            newNoteInputRef.current?.focus();
-                            setIsUserActive(false);
-                          } else {
+                          
+                          try {
+                            const res = await fetch(`${API_URL}/thoughts/`, {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ content: newNoteInput.trim() })
+                            });
+                            
+                            if (res.ok) {
+                              // Remove pending thought and refresh with real data
+                              removePendingThought(tempId);
+                              await refreshProcessedThoughts();
+                              setNewNoteInput("");
+                              newNoteInputRef.current?.focus();
+                              setIsUserActive(false);
+                            } else {
+                              // Remove pending thought on failure
+                              removePendingThought(tempId);
+                              alert("Failed to add note");
+                              setIsUserActive(false);
+                            }
+                          } catch (err) {
+                            // Remove pending thought on error
+                            removePendingThought(tempId);
+                            console.error("Error adding note:", err);
                             alert("Failed to add note");
                             setIsUserActive(false);
                           }
@@ -865,19 +1011,19 @@ export default function Home() {
             {selectedDestination !== null && filteredThoughts.length > 0 && (
               sortMode === 'manual' ? (
                 <SortableContext
-                  items={filteredThoughts.map((t) => t.id)}
+                  items={filteredThoughts.filter(t => !('isPending' in t)).map((t) => (t as ProcessedThought).id)}
                   strategy={verticalListSortingStrategy}
                 >
                   <ul className="flex flex-col gap-2">
                     {filteredThoughts.map((thought) => (
-                      <SortableThoughtItem key={thought.id} thought={thought} editThoughtId={editThoughtId} />
+                      <SortableThoughtItem key={getThoughtId(thought)} thought={thought} editThoughtId={editThoughtId} />
                     ))}
                   </ul>
                 </SortableContext>
               ) : (
                 <ul className="flex flex-col gap-2">
                   {filteredThoughts.map((thought) => (
-                    <SortableThoughtItem key={thought.id} thought={thought} editThoughtId={editThoughtId} />
+                    <SortableThoughtItem key={getThoughtId(thought)} thought={thought} editThoughtId={editThoughtId} />
                   ))}
                 </ul>
               )
@@ -932,22 +1078,39 @@ export default function Home() {
                   e.preventDefault();
                   if (selectedDestination === "__all__") {
                     if (newNoteInput.trim()) {
+                      // Immediately add pending thought (no destination yet)
+                      const tempId = addPendingThought(newNoteInput.trim());
+                      
                       setIsUserActive(true);
                       const API_URL = process.env.NEXT_PUBLIC_API_URL;
                       if (!API_URL) {
                         throw new Error("NEXT_PUBLIC_API_URL is not set in the environment variables.");
                       }
-                      const res = await fetch(`${API_URL}/thoughts/`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ content: newNoteInput.trim() })
-                      });
-                      if (res.ok) {
-                        await refreshProcessedThoughts();
-                        setNewNoteInput("");
-                        setShowAddNoteModal(false);
-                        setIsUserActive(false);
-                      } else {
+                      
+                      try {
+                        const res = await fetch(`${API_URL}/thoughts/`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ content: newNoteInput.trim() })
+                        });
+                        
+                        if (res.ok) {
+                          // Remove pending thought and refresh with real data
+                          removePendingThought(tempId);
+                          await refreshProcessedThoughts();
+                          setNewNoteInput("");
+                          setShowAddNoteModal(false);
+                          setIsUserActive(false);
+                        } else {
+                          // Remove pending thought on failure
+                          removePendingThought(tempId);
+                          alert("Failed to add note");
+                          setIsUserActive(false);
+                        }
+                      } catch (err) {
+                        // Remove pending thought on error
+                        removePendingThought(tempId);
+                        console.error("Error adding note:", err);
                         alert("Failed to add note");
                         setIsUserActive(false);
                       }
